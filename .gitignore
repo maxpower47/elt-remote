@@ -1,5 +1,10 @@
 .pio/
 .vscode/
+__pycache__/
+*.pyc
+*.bin
+*.hex
+*.uf2
 cert.pem
 key.pem
 node_modules/
