@@ -267,7 +267,7 @@
 <body>
     <header>
         <div class="header-title">
-            <h1>📡 Beacon Center <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.2.0</span></h1>
+            <h1>📡 Beacon Center <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.2.1</span></h1>
             <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
         </div>
         <div>
@@ -545,20 +545,14 @@
             }
         }
 
-        let pendingCommandTime = 0;
-
         function updateDashboard(data) {
             lastRxTimestamp = Date.now();
 
-            const isPendingCmd = (Date.now() - pendingCommandTime < 4000);
-
             const badge = document.getElementById('badgeState');
             if (badge && data.state) {
-                if (!isPendingCmd) {
-                    badge.className = 'status-badge ' + data.state;
-                    badge.innerText = data.state;
-                    updateControlButtonsState(data.state);
-                }
+                badge.className = 'status-badge ' + data.state;
+                badge.innerText = data.state;
+                updateControlButtonsState(data.state);
             }
 
             // Beacon Battery

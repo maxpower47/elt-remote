@@ -221,6 +221,7 @@ void updateTimerState() {
     updateHardwareOutputs();
 }
 
+void onDio1();
 extern volatile bool rxFlag;
 String generateTelemetry();
 
@@ -256,8 +257,10 @@ void parseCommand(const String& cmdStr) {
         // Transmit immediate telemetry update back over LoRa & BLE
         delay(50);
         String payload = generateTelemetry();
+        radio.clearDio1Action();
         radio.transmit(payload);
         rxFlag = false;
+        radio.setDio1Action(onDio1);
         radio.startReceive();
     }
 }
@@ -389,8 +392,10 @@ void loop() {
         lastTx = millis();
         ledSet(HW_LED_GREEN, true);
         String payload = generateTelemetry();
+        radio.clearDio1Action();
         int txState = radio.transmit(payload);
         rxFlag = false;
+        radio.setDio1Action(onDio1);
         radio.startReceive();
         delay(80);
         ledSet(HW_LED_GREEN, false);

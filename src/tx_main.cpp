@@ -105,16 +105,13 @@ class MyServerCallbacks: public BLEServerCallbacks {
     }
 };
 
-void transmitPendingCommand() {
-    if (pendingCommandToSend.length() > 0) {
-        String txMsg = pendingCommandToSend;
-        pendingCommandToSend = "";
-        lastTxStatus = txMsg;
-        Serial.println("[Heltec V3 TX Immediate] " + txMsg);
-        radio.transmit(txMsg);
-        rxFlag = false;
-        radio.startReceive();
-    }
+void transmitLoRaCommand(String msg) {
+    radio.clearDio1Action();
+    int txRes = radio.transmit(msg);
+    Serial.printf("[Heltec V3 TX] %s (code: %d)\n", msg.c_str(), txRes);
+    rxFlag = false;
+    radio.setDio1Action(onDio1);
+    radio.startReceive();
 }
 
 class MyCallbacks: public BLECharacteristicCallbacks {
@@ -126,7 +123,6 @@ class MyCallbacks: public BLECharacteristicCallbacks {
             if (input.startsWith("{")) {
                 pendingCommandToSend = input;
                 lastTxStatus = "BLE Cmd Queued";
-                transmitPendingCommand();
             }
         }
     }
@@ -704,6 +700,16 @@ void setup() {
 
 void loop() {
     handleButton();
+    static uint32_t lastPingTime = 0;
+
+    // Transmit pending BLE or menu commands over LoRa immediately in main loop context (SPI safe)
+    if (pendingCommandToSend.length() > 0) {
+        String txMsg = pendingCommandToSend;
+        pendingCommandToSend = "";
+        lastTxStatus = txMsg;
+        lastPingTime = millis(); // Reset ping timer so ping doesn't collide
+        transmitLoRaCommand(txMsg);
+    }
 
     if (rxFlag) {
         rxFlag = false;
@@ -717,24 +723,11 @@ void loop() {
         }
     }
 
-    static uint32_t lastPingTime = 0;
     if (millis() - lastPingTime > 3000) {
         lastPingTime = millis();
         txBatt = readTxBatteryVoltage();
-        
-        String txMsg = "{\"cmd\":\"PING\"}";
-        if (pendingCommandToSend.length() > 0) {
-            txMsg = pendingCommandToSend;
-            lastTxStatus = txMsg;
-            pendingCommandToSend = "";
-        } else {
-            lastTxStatus = "PING OK";
-        }
-
-        Serial.println("[Heltec V3 TX] " + txMsg);
-        radio.transmit(txMsg);
-        rxFlag = false;
-        radio.startReceive();
+        lastTxStatus = "PING OK";
+        transmitLoRaCommand("{\"cmd\":\"PING\"}");
     }
 
     updateOLED();
