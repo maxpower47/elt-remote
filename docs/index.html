@@ -269,7 +269,7 @@
     <header>
         <div class="header-title">
             <h1>📡 Beacon Center</h1>
-            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.3.1</span>
+            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.3.2</span>
             <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
         </div>
         <button id="btnConnectBle" class="btn btn-connect" onclick="toggleWebBluetooth()">📲 Connect BLE</button>
@@ -541,13 +541,17 @@
                             bleRxBuffer = bleRxBuffer.substring(i + 1);
                             i = -1; // Reset index to scan newly sliced buffer
 
+                            // Sanitize control characters and null bytes
+                            const cleanJsonStr = jsonStr.replace(/[\u0000-\u001F\u007F-\u009F]/g, "").trim();
+
                             try {
-                                const data = JSON.parse(jsonStr);
+                                const data = JSON.parse(cleanJsonStr);
                                 if (data && typeof data === 'object') {
                                     updateDashboard(data);
                                 }
                             } catch (e) {
-                                logConsole("BLE Parse Warning [" + e.message + "]: " + jsonStr);
+                                const char20 = jsonStr.length > 20 ? jsonStr.charCodeAt(20) : -1;
+                                logConsole("BLE Parse Warning [" + e.message + "] (Char@20=" + char20 + "): " + jsonStr);
                             }
                         }
                     }
