@@ -267,7 +267,7 @@
 <body>
     <header>
         <div class="header-title">
-            <h1>📡 Beacon Center <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.1.6</span></h1>
+            <h1>📡 Beacon Center <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.1.7</span></h1>
             <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
         </div>
         <div>
@@ -513,7 +513,9 @@
         function handleBleNotification(event) {
             const value = event.target.value;
             const decoder = new TextDecoder('utf-8');
-            bleRxBuffer += decoder.decode(value);
+            const str = decoder.decode(value);
+            logConsole("BLE Event (" + value.byteLength + "b): " + str);
+            bleRxBuffer += str;
 
             let depth = 0;
             let startIdx = -1;
