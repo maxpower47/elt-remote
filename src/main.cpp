@@ -284,6 +284,7 @@ void broadcastBleTelemetry() {
     if (Bluefruit.connected()) {
         String payload = generateTelemetry() + "\n";
         bleuart.write((const uint8_t*)payload.c_str(), payload.length());
+        bleuart.flush();
     }
 }
 

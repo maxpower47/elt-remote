@@ -232,8 +232,16 @@ void broadcastBleTelemetry() {
         String bleJson;
         serializeJson(bleDoc, bleJson);
         bleJson += "\n";
-        pTxCharacteristic->setValue((const uint8_t*)bleJson.c_str(), bleJson.length());
-        pTxCharacteristic->notify();
+
+        int len = bleJson.length();
+        int offset = 0;
+        while (offset < len) {
+            int chunkSize = min(20, len - offset);
+            pTxCharacteristic->setValue((const uint8_t*)(bleJson.c_str() + offset), chunkSize);
+            pTxCharacteristic->notify();
+            offset += chunkSize;
+            delay(10);
+        }
     }
 }
 

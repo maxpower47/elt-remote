@@ -267,7 +267,7 @@
 <body>
     <header>
         <div class="header-title">
-            <h1>📡 Beacon Center <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.1.5</span></h1>
+            <h1>📡 Beacon Center <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.1.6</span></h1>
             <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
         </div>
         <div>
@@ -513,38 +513,33 @@
         function handleBleNotification(event) {
             const value = event.target.value;
             const decoder = new TextDecoder('utf-8');
-            const chunk = decoder.decode(value);
-            logConsole("BLE Chunk: " + chunk);
-            bleRxBuffer += chunk;
+            bleRxBuffer += decoder.decode(value);
 
-            // Extract complete JSON objects from buffer
-            let firstOpen = bleRxBuffer.indexOf('{');
-            let lastClose = bleRxBuffer.lastIndexOf('}');
+            let depth = 0;
+            let startIdx = -1;
 
-            if (firstOpen !== -1 && lastClose > firstOpen) {
-                const jsonCandidate = bleRxBuffer.substring(firstOpen, lastClose + 1);
-                try {
-                    const data = JSON.parse(jsonCandidate);
-                    bleRxBuffer = bleRxBuffer.substring(lastClose + 1);
-                    updateDashboard(data);
-                } catch (e) {
-                    // Search for smaller JSON segments if nested/concatenated
-                    const matches = bleRxBuffer.match(/\{[^{}]*\}/g);
-                    if (matches) {
-                        for (let match of matches) {
-                            try {
-                                const data = JSON.parse(match);
-                                updateDashboard(data);
-                                bleRxBuffer = "";
-                                break;
-                            } catch (err) {}
+            for (let i = 0; i < bleRxBuffer.length; i++) {
+                if (bleRxBuffer[i] === '{') {
+                    if (depth === 0) startIdx = i;
+                    depth++;
+                } else if (bleRxBuffer[i] === '}') {
+                    depth--;
+                    if (depth === 0 && startIdx !== -1) {
+                        const jsonStr = bleRxBuffer.substring(startIdx, i + 1);
+                        bleRxBuffer = bleRxBuffer.substring(i + 1);
+                        try {
+                            const data = JSON.parse(jsonStr);
+                            updateDashboard(data);
+                        } catch (e) {
+                            logConsole("BLE Parse Error: " + e.message);
                         }
+                        break;
                     }
                 }
             }
 
-            if (bleRxBuffer.length > 1024) {
-                bleRxBuffer = ""; // Clear buffer safety limit
+            if (bleRxBuffer.length > 2048) {
+                bleRxBuffer = ""; // Reset safety limit
             }
         }
 
