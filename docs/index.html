@@ -269,7 +269,7 @@
     <header>
         <div class="header-title">
             <h1>📡 Beacon Center</h1>
-            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.2.7</span>
+            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.2.8</span>
             <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
         </div>
         <button id="btnConnectBle" class="btn btn-connect" onclick="toggleWebBluetooth()">📲 Connect BLE</button>
@@ -569,31 +569,12 @@
             }
         }
 
-        let pendingCommandName = null;
-        let pendingCommandExpiry = 0;
-
         function updateDashboard(data) {
             if (!data || typeof data !== 'object') return;
             lastRxTimestamp = Date.now();
 
             if (data.state && String(data.state).trim() !== '') {
                 const cleanState = String(data.state).trim().toUpperCase();
-
-                // Ignore stale in-flight telemetry packets from before the command took effect
-                if (pendingCommandName) {
-                    const isTargetState = 
-                        (pendingCommandName === 'ARM_NOW' && cleanState === 'ACTIVE') ||
-                        (pendingCommandName === 'DISARM' && cleanState === 'DISARMED') ||
-                        (pendingCommandName === 'ARM_TIMER' && cleanState === 'ARMED_TIMER');
-                    
-                    if (!isTargetState && Date.now() < pendingCommandExpiry) {
-                        logConsole(`[Optimistic Lock] Waiting for ${pendingCommandName}... (ignoring stale ${cleanState})`);
-                        return;
-                    } else {
-                        pendingCommandName = null;
-                    }
-                }
-
                 currentBeaconState = cleanState;
 
                 const badge = document.getElementById('badgeState');

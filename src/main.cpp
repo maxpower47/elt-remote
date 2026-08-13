@@ -255,7 +255,12 @@ void parseCommand(const String& cmdStr) {
             Serial.printf("[RAK4631] Command Received: ARM_TIMER (%ds)\n", armTimerDurationSec);
         }
 
-        // Transmit immediate telemetry update back over LoRa & BLE
+        // Transmit immediate BLE telemetry update with 0ms delay if BLE connected
+        if (Bluefruit.connected()) {
+            broadcastBleTelemetry();
+        }
+
+        // Transmit over LoRa for distant Heltec units
         delay(150);
         String payload = generateTelemetry();
         radio.clearDio1Action();
@@ -263,10 +268,6 @@ void parseCommand(const String& cmdStr) {
         rxFlag = false;
         radio.setDio1Action(onDio1);
         radio.startReceive();
-
-        if (Bluefruit.connected()) {
-            broadcastBleTelemetry();
-        }
     }
 }
 
@@ -308,18 +309,24 @@ void connect_callback(uint16_t conn_handle) {
     broadcastBleTelemetry();
 }
 
-void bleRxCallback(uint16_t conn_hdl) {
-    (void) conn_hdl;
-    String input = "";
+String bleRxBufferRAK = "";
+
+void bleRxCallback(uint16_t conn_handle) {
+    (void) conn_handle;
     while (bleuart.available()) {
         char c = (char) bleuart.read();
-        input += c;
+        bleRxBufferRAK += c;
     }
-    input.trim();
-    if (input.startsWith("{")) {
+
+    String trimmed = bleRxBufferRAK;
+    trimmed.trim();
+    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+        String input = trimmed;
+        bleRxBufferRAK = "";
         Serial.println("[BLE RAK4631 RX] Direct Command: " + input);
         parseCommand(input);
-        broadcastBleTelemetry();
+    } else if (bleRxBufferRAK.length() > 256) {
+        bleRxBufferRAK = "";
     }
 }
 

@@ -703,16 +703,34 @@ void setup() {
     }
 }
 
+String activeCommand = "";
+uint32_t activeCommandStart = 0;
+int activeCommandRetries = 0;
+
 void loop() {
     handleButton();
 
-    // Transmit pending BLE or menu commands over LoRa immediately in main loop context
+    // Transmit pending commands immediately
     if (pendingCommandToSend.length() > 0) {
-        String txMsg = pendingCommandToSend;
+        activeCommand = pendingCommandToSend;
         pendingCommandToSend = "";
-        lastTxStatus = txMsg;
+        activeCommandStart = millis();
+        activeCommandRetries = 0;
         
-        transmitLoRaCommand(txMsg);
+        lastTxStatus = activeCommand;
+        transmitLoRaCommand(activeCommand);
+    }
+    // Asynchronous re-transmit if no telemetry ACK received within 500ms
+    else if (activeCommand.length() > 0 && (millis() - activeCommandStart > 500)) {
+        activeCommandRetries++;
+        if (activeCommandRetries <= 3) {
+            activeCommandStart = millis();
+            Serial.printf("[Heltec V3 Retry %d] Re-sending %s\n", activeCommandRetries, activeCommand.c_str());
+            transmitLoRaCommand(activeCommand);
+        } else {
+            activeCommand = ""; // Give up after 3 retries
+            lastTxStatus = "TX Timeout";
+        }
     }
 
     if (rxFlag) {
@@ -721,6 +739,7 @@ void loop() {
         int state = radio.readData(str);
         radio.startReceive();
         if (state == RADIOLIB_ERR_NONE && str.length() > 0) {
+            activeCommand = ""; // Clear pending command retry upon receiving telemetry!
             rawJson = str;
             parseTelemetry(str);
             Serial.println("[Heltec V3 RX] " + str);
