@@ -227,7 +227,7 @@ extern volatile bool rxFlag;
 String generateTelemetry();
 
 void parseCommand(const String& cmdStr) {
-    StaticJsonDocument<256> doc;
+    StaticJsonDocument<512> doc;
     DeserializationError err = deserializeJson(doc, cmdStr);
     if (err) return;
 

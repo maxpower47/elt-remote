@@ -269,7 +269,7 @@
     <header>
         <div class="header-title">
             <h1>📡 Beacon Center</h1>
-            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.2.9</span>
+            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.3.0</span>
             <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
         </div>
         <button id="btnConnectBle" class="btn btn-connect" onclick="toggleWebBluetooth()">📲 Connect BLE</button>
@@ -537,14 +537,17 @@
                 let firstBrace = line.indexOf('{');
                 let lastBrace = line.lastIndexOf('}');
                 if (firstBrace !== -1 && lastBrace > firstBrace) {
-                    const jsonStr = line.substring(firstBrace, lastBrace + 1);
-                    try {
-                        const data = JSON.parse(jsonStr);
-                        if (data && typeof data === 'object') {
-                            updateDashboard(data);
+                    const jsonStr = line.substring(firstBrace, lastBrace + 1).trim();
+                    if (jsonStr.startsWith('{') && jsonStr.endsWith('}')) {
+                        try {
+                            const data = JSON.parse(jsonStr);
+                            if (data && typeof data === 'object') {
+                                updateDashboard(data);
+                            }
+                        } catch (e) {
+                            // Only log parse errors for complete-looking JSON objects
+                            logConsole("BLE Parse Warning [" + e.message + "]: " + jsonStr);
                         }
-                    } catch (e) {
-                        logConsole("BLE Parse Error [" + e.message + "]: " + jsonStr);
                     }
                 }
             }
