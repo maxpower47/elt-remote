@@ -92,9 +92,9 @@ adafruit-nrfutil dfu serial --package .pio/build/wiscore_rak4631/firmware.zip -p
 
 ## 🌐 Web PWA Dashboard Deployment
 
-Launch HTTPS server locally from the `web/` directory:
+Launch HTTPS server locally from the `docs/` directory:
 ```bash
-cd web
+cd docs
 python3 -c "
 import http.server, ssl
 server_address = ('0.0.0.0', 8443)
@@ -117,12 +117,12 @@ Open `https://<YOUR-IP>:8443` in Chrome / Safari / Edge and tap **"Add to Home S
 ├── .gitignore          # Rules ignoring build output & SSL certs
 ├── README.md           # System architecture, pinout tables, & build guide
 ├── boards/             # Board definitions
+├── docs/               # GitHub Pages Web PWA Dashboard
+│   ├── index.html      # Web Bluetooth Dashboard (Offline UI & Leaflet Maps)
+│   ├── manifest.json   # PWA App Manifest
+│   └── sw.js           # Service Worker for 100% Offline Caching
 ├── platformio.ini      # PlatformIO build configuration for both environments
-├── src/
-│   ├── main.cpp        # RAK4631 Beacon C++ Firmware (SX1262 LoRa + BLE + MOSFET Gate)
-│   └── tx_main.cpp     # Heltec V3 C++ Firmware (OLED UI, Signal Analyzer, Telemetry)
-└── web/
-    ├── index.html      # Web Bluetooth Dashboard (Offline UI & Leaflet Maps)
-    ├── manifest.json   # PWA App Manifest
-    └── sw.js           # Service Worker for 100% Offline Caching
+└── src/
+    ├── main.cpp        # RAK4631 Beacon C++ Firmware (SX1262 LoRa + BLE + MOSFET Gate)
+    └── tx_main.cpp     # Heltec V3 C++ Firmware (OLED UI, Signal Analyzer, Telemetry)
 ```
