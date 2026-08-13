@@ -23,9 +23,9 @@
 #define PIN_ADC_CTRL 37  // Power switch for battery divider
 
 // BLE Service & Characteristic UUIDs (Nordic UART Service - NUS)
-#define SERVICE_UUID           "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
-#define CHARACTERISTIC_UUID_RX "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
-#define CHARACTERISTIC_UUID_TX "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
+#define SERVICE_UUID           "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
+#define CHARACTERISTIC_UUID_RX "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
+#define CHARACTERISTIC_UUID_TX "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 
 SX1262 radio = new Module(LORA_CS, LORA_DIO1, LORA_RST, LORA_BUSY);
 static SSD1306Wire display(0x3c, SDA_OLED, SCL_OLED, GEOMETRY_128_64);
@@ -659,12 +659,12 @@ void setup() {
 
     pService->start();
 
-    BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-    pAdvertising->addServiceUUID(SERVICE_UUID);
+    BLEAdvertising *pAdvertising = pServer->getAdvertising();
+    pAdvertising->addServiceUUID(BLEUUID(SERVICE_UUID));
     pAdvertising->setScanResponse(true);
     pAdvertising->setMinPreferred(0x06);
     pAdvertising->setMinPreferred(0x12);
-    BLEDevice::startAdvertising();
+    pAdvertising->start();
 
     int state = radio.begin(915.0, 125.0, 7, 5, 0x34, 22, 8, 1.6, false);
     if (state == RADIOLIB_ERR_NONE) {
