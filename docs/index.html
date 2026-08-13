@@ -267,7 +267,7 @@
 <body>
     <header>
         <div class="header-title">
-            <h1>📡 Beacon Center <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.1.0</span></h1>
+            <h1>📡 Beacon Center <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.1.1</span></h1>
             <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
         </div>
         <div>
@@ -422,13 +422,9 @@
                 bleDevice = await navigator.bluetooth.requestDevice({
                     filters: [
                         { namePrefix: 'Heltec', services: [NUS_SERVICE_UUID] },
-                        { namePrefix: 'RAK', services: [NUS_SERVICE_UUID] },
-                        { services: [NUS_SERVICE_UUID] }
+                        { namePrefix: 'RAK', services: [NUS_SERVICE_UUID] }
                     ],
-                    optionalServices: [
-                        NUS_SERVICE_UUID,
-                        '6e400001-b5a3-f393-e0a9-e50e24dcca9e'
-                    ]
+                    optionalServices: [NUS_SERVICE_UUID]
                 });
 
                 bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
@@ -436,35 +432,11 @@
                 logConsole(`Connecting GATT (${bleDevice.name})...`);
                 const server = await bleDevice.gatt.connect();
 
-                logConsole("Discovering primary services...");
-                let services = [];
-                try {
-                    services = await server.getPrimaryServices();
-                    logConsole(`Found ${services.length} services: ` + services.map(s => s.uuid).join(", "));
-                } catch (sErr) {
-                    logConsole(`getPrimaryServices error: ${sErr.message}`);
-                }
+                logConsole("Connecting Nordic UART Service...");
+                const service = await server.getPrimaryService(NUS_SERVICE_UUID);
 
-                let service;
-                try {
-                    service = await server.getPrimaryService(NUS_SERVICE_UUID);
-                } catch (svcErr) {
-                    service = services.find(s => s.uuid.toLowerCase() === NUS_SERVICE_UUID.toLowerCase());
-                    if (!service && services.length > 0) {
-                        service = services[0];
-                    }
-                }
-
-                if (!service) {
-                    throw new Error(`No NUS service match (Found ${services.length} services). If on Android, please Forget/Unpair Heltec in Android Bluetooth Settings & toggle Bluetooth OFF/ON to clear Android GATT cache.`);
-                }
-
-                logConsole(`Bound to Service: ${service.uuid}`);
-                const characteristics = await service.getCharacteristics();
-                logConsole(`Found ${characteristics.length} chars: ` + characteristics.map(c => c.uuid).join(", "));
-
-                txCharacteristic = characteristics.find(c => c.uuid.toLowerCase() === NUS_TX_UUID.toLowerCase()) || characteristics[0];
-                rxCharacteristic = characteristics.find(c => c.uuid.toLowerCase() === NUS_RX_UUID.toLowerCase()) || characteristics[1] || characteristics[0];
+                txCharacteristic = await service.getCharacteristic(NUS_TX_UUID);
+                rxCharacteristic = await service.getCharacteristic(NUS_RX_UUID);
 
                 await txCharacteristic.startNotifications();
                 txCharacteristic.addEventListener('characteristicvaluechanged', handleBleNotification);
