@@ -269,7 +269,7 @@
     <header>
         <div class="header-title">
             <h1>📡 Beacon Center</h1>
-            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.2.4</span>
+            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.2.5</span>
             <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
         </div>
         <button id="btnConnectBle" class="btn btn-connect" onclick="toggleWebBluetooth()">📲 Connect BLE</button>
@@ -647,7 +647,11 @@
                 }
             }
 
-            logConsole(`RX | Device: ${data.device || 'BLE'} | State: ${data.state || 'N/A'}`);
+            if (data.state && data.state.trim() !== '') {
+                logConsole(`RX | Device: ${data.device || 'BLE'} | State: ${data.state}`);
+            } else {
+                logConsole(`RX | Device: ${data.device || 'BLE'} | Info: ${JSON.stringify(data)}`);
+            }
         }
 
         // Toggle Payload Log Visibility

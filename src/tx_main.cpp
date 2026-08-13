@@ -226,7 +226,7 @@ void broadcastBleTelemetry() {
         StaticJsonDocument<512> bleDoc;
         bleDoc["type"] = "TELEMETRY";
         bleDoc["device"] = "HELTEC_V3_TX";
-        bleDoc["state"] = beaconState;
+        bleDoc["state"] = (beaconState.length() > 0) ? beaconState : "DISARMED";
         bleDoc["batt"] = beaconBatt;
         bleDoc["tx_batt"] = txBatt;
         bleDoc["remaining_sec"] = remainingSec;
@@ -244,11 +244,11 @@ void broadcastBleTelemetry() {
 
         int len = bleJson.length();
         int offset = 0;
-        while (offset < len) {
+        while (offset < len && deviceConnected) {
             int chunkSize = min(20, len - offset);
             pTxCharacteristic->notify((const uint8_t*)(bleJson.c_str() + offset), chunkSize);
             offset += chunkSize;
-            delay(15);
+            delay(20);
         }
     }
 }
@@ -258,7 +258,12 @@ void parseTelemetry(const String& jsonStr) {
     DeserializationError err = deserializeJson(doc, jsonStr);
     if (err) return;
 
-    if (doc.containsKey("state")) beaconState = doc["state"].as<String>();
+    if (doc.containsKey("state")) {
+        String st = doc["state"].as<String>();
+        if (st.length() > 0) {
+            beaconState = st;
+        }
+    }
     if (doc.containsKey("remaining_sec")) remainingSec = doc["remaining_sec"].as<uint32_t>();
     if (doc.containsKey("batt")) beaconBatt = doc["batt"].as<float>();
     
