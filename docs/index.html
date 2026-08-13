@@ -418,13 +418,21 @@
             }
 
             try {
-                logConsole("Requesting Web Bluetooth device...");
+                logConsole("Scanning Web Bluetooth devices...");
                 bleDevice = await navigator.bluetooth.requestDevice({
                     filters: [
-                        { namePrefix: 'Heltec_V3' },
-                        { namePrefix: 'RAK4631' }
+                        { services: [NUS_SERVICE_UUID] },
+                        { namePrefix: 'Heltec' },
+                        { namePrefix: 'RAK' }
                     ],
                     optionalServices: [NUS_SERVICE_UUID]
+                }).catch(async (err) => {
+                    // Fallback: If service filter is blocked by Android, prompt with all devices
+                    logConsole("Retrying with all devices search...");
+                    return await navigator.bluetooth.requestDevice({
+                        acceptAllDevices: true,
+                        optionalServices: [NUS_SERVICE_UUID]
+                    });
                 });
 
                 bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
