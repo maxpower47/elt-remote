@@ -666,7 +666,7 @@ void setup() {
     display.setFont(ArialMT_Plain_10);
     updateOLED();
 
-    BLEDevice::init("Heltec_V3");
+    BLEDevice::init("ELT Remote");
     pServer = BLEDevice::createServer();
     pServer->setCallbacks(new MyServerCallbacks());
 

@@ -269,7 +269,7 @@
     <header>
         <div class="header-title">
             <h1>📡 Beacon Center</h1>
-            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.3.2</span>
+            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.3.3</span>
             <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
         </div>
         <button id="btnConnectBle" class="btn btn-connect" onclick="toggleWebBluetooth()">📲 Connect BLE</button>
@@ -431,8 +431,10 @@
                 logConsole("Scanning Web Bluetooth devices...");
                 bleDevice = await navigator.bluetooth.requestDevice({
                     filters: [
-                        { namePrefix: 'Heltec', services: [NUS_SERVICE_UUID] },
-                        { namePrefix: 'RAK', services: [NUS_SERVICE_UUID] }
+                        { namePrefix: 'ELT' },
+                        { namePrefix: 'Heltec' },
+                        { namePrefix: 'RAK' },
+                        { services: [NUS_SERVICE_UUID] }
                     ],
                     optionalServices: [NUS_SERVICE_UUID]
                 });

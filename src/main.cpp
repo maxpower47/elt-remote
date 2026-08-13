@@ -318,11 +318,19 @@ void bleRxCallback(uint16_t conn_handle) {
         bleRxBufferRAK += c;
     }
 
-    String trimmed = bleRxBufferRAK;
-    trimmed.trim();
-    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-        String input = trimmed;
+    // Strip leading non-JSON characters
+    int firstBrace = bleRxBufferRAK.indexOf('{');
+    if (firstBrace > 0) {
+        bleRxBufferRAK = bleRxBufferRAK.substring(firstBrace);
+        firstBrace = 0;
+    } else if (firstBrace < 0 && bleRxBufferRAK.length() > 0) {
         bleRxBufferRAK = "";
+    }
+
+    int lastBrace = bleRxBufferRAK.lastIndexOf('}');
+    if (firstBrace == 0 && lastBrace > 0) {
+        String input = bleRxBufferRAK.substring(0, lastBrace + 1);
+        bleRxBufferRAK = bleRxBufferRAK.substring(lastBrace + 1);
         Serial.println("[BLE RAK4631 RX] Direct Command: " + input);
         parseCommand(input);
     } else if (bleRxBufferRAK.length() > 256) {
@@ -355,7 +363,7 @@ void setup() {
 
     Bluefruit.begin();
     Bluefruit.setTxPower(4);
-    Bluefruit.setName("RAK4631_Beacon");
+    Bluefruit.setName("ELT Beacon");
     Bluefruit.Periph.setConnectCallback(connect_callback);
 
     bleuart.begin();
