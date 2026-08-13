@@ -237,10 +237,9 @@ void broadcastBleTelemetry() {
         int offset = 0;
         while (offset < len) {
             int chunkSize = min(20, len - offset);
-            pTxCharacteristic->setValue((const uint8_t*)(bleJson.c_str() + offset), chunkSize);
-            pTxCharacteristic->notify();
+            pTxCharacteristic->notify((const uint8_t*)(bleJson.c_str() + offset), chunkSize);
             offset += chunkSize;
-            delay(10);
+            delay(15);
         }
     }
 }
