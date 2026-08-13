@@ -44,24 +44,25 @@
         header {
             background-color: var(--panel-bg);
             border-bottom: 1px solid var(--border-color);
-            padding: 12px 16px;
+            padding: 10px 12px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            flex-wrap: wrap;
-            gap: 10px;
+            flex-wrap: nowrap;
+            gap: 6px;
             z-index: 1000;
         }
 
         .header-title {
             display: flex;
             align-items: center;
-            gap: 10px;
-            flex-wrap: wrap;
+            gap: 6px;
+            flex-wrap: nowrap;
+            min-width: 0;
         }
 
         .header-title h1 {
-            font-size: 1.1rem;
+            font-size: 0.95rem;
             font-weight: 600;
             white-space: nowrap;
         }
@@ -207,7 +208,7 @@
             cursor: not-allowed;
         }
 
-        .btn-connect { background: var(--accent-blue); color: #0f172a; font-weight: 700; }
+        .btn-connect { background: var(--accent-blue); color: #0f172a; font-weight: 700; white-space: nowrap; flex-shrink: 0; padding: 6px 12px; font-size: 0.82rem; }
         .btn-connect:hover { background: #7dd3fc; }
 
         .btn-danger { background: var(--accent-red); color: white; }
@@ -268,7 +269,7 @@
     <header>
         <div class="header-title">
             <h1>📡 Beacon Center</h1>
-            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.2.2</span>
+            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.2.3</span>
             <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
         </div>
         <button id="btnConnectBle" class="btn btn-connect" onclick="toggleWebBluetooth()">📲 Connect BLE</button>
