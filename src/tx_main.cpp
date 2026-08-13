@@ -105,6 +105,18 @@ class MyServerCallbacks: public BLEServerCallbacks {
     }
 };
 
+void transmitPendingCommand() {
+    if (pendingCommandToSend.length() > 0) {
+        String txMsg = pendingCommandToSend;
+        pendingCommandToSend = "";
+        lastTxStatus = txMsg;
+        Serial.println("[Heltec V3 TX Immediate] " + txMsg);
+        radio.transmit(txMsg);
+        rxFlag = false;
+        radio.startReceive();
+    }
+}
+
 class MyCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *pCharacteristic) {
         std::string rxValue = pCharacteristic->getValue();
@@ -114,6 +126,7 @@ class MyCallbacks: public BLECharacteristicCallbacks {
             if (input.startsWith("{")) {
                 pendingCommandToSend = input;
                 lastTxStatus = "BLE Cmd Queued";
+                transmitPendingCommand();
             }
         }
     }
