@@ -269,7 +269,7 @@
     <header>
         <div class="header-title">
             <h1>📡 Beacon Center</h1>
-            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.3.0</span>
+            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.3.1</span>
             <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
         </div>
         <button id="btnConnectBle" class="btn btn-connect" onclick="toggleWebBluetooth()">📲 Connect BLE</button>
@@ -526,27 +526,29 @@
             const str = decoder.decode(value);
             bleRxBuffer += str;
 
-            let lines = bleRxBuffer.split('\n');
-            // Keep the last incomplete fragment in bleRxBuffer
-            bleRxBuffer = lines.pop();
+            let depth = 0;
+            let startIdx = -1;
 
-            for (let line of lines) {
-                line = line.trim();
-                if (line.length === 0) continue;
+            for (let i = 0; i < bleRxBuffer.length; i++) {
+                if (bleRxBuffer[i] === '{') {
+                    if (depth === 0) startIdx = i;
+                    depth++;
+                } else if (bleRxBuffer[i] === '}') {
+                    if (depth > 0) {
+                        depth--;
+                        if (depth === 0 && startIdx !== -1) {
+                            const jsonStr = bleRxBuffer.substring(startIdx, i + 1);
+                            bleRxBuffer = bleRxBuffer.substring(i + 1);
+                            i = -1; // Reset index to scan newly sliced buffer
 
-                let firstBrace = line.indexOf('{');
-                let lastBrace = line.lastIndexOf('}');
-                if (firstBrace !== -1 && lastBrace > firstBrace) {
-                    const jsonStr = line.substring(firstBrace, lastBrace + 1).trim();
-                    if (jsonStr.startsWith('{') && jsonStr.endsWith('}')) {
-                        try {
-                            const data = JSON.parse(jsonStr);
-                            if (data && typeof data === 'object') {
-                                updateDashboard(data);
+                            try {
+                                const data = JSON.parse(jsonStr);
+                                if (data && typeof data === 'object') {
+                                    updateDashboard(data);
+                                }
+                            } catch (e) {
+                                logConsole("BLE Parse Warning [" + e.message + "]: " + jsonStr);
                             }
-                        } catch (e) {
-                            // Only log parse errors for complete-looking JSON objects
-                            logConsole("BLE Parse Warning [" + e.message + "]: " + jsonStr);
                         }
                     }
                 }
