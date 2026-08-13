@@ -222,6 +222,7 @@ void updateTimerState() {
 }
 
 void onDio1();
+void broadcastBleTelemetry();
 extern volatile bool rxFlag;
 String generateTelemetry();
 
@@ -255,13 +256,17 @@ void parseCommand(const String& cmdStr) {
         }
 
         // Transmit immediate telemetry update back over LoRa & BLE
-        delay(50);
+        delay(150);
         String payload = generateTelemetry();
         radio.clearDio1Action();
         radio.transmit(payload);
         rxFlag = false;
         radio.setDio1Action(onDio1);
         radio.startReceive();
+
+        if (Bluefruit.connected()) {
+            broadcastBleTelemetry();
+        }
     }
 }
 

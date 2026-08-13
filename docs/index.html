@@ -269,7 +269,7 @@
     <header>
         <div class="header-title">
             <h1>📡 Beacon Center</h1>
-            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.2.3</span>
+            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.2.4</span>
             <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
         </div>
         <button id="btnConnectBle" class="btn btn-connect" onclick="toggleWebBluetooth()">📲 Connect BLE</button>
@@ -527,27 +527,41 @@
             logConsole("BLE Event (" + value.byteLength + "b): " + str);
             bleRxBuffer += str;
 
-            let depth = 0;
-            let startIdx = -1;
+            // Trim leading non-JSON characters
+            let firstBrace = bleRxBuffer.indexOf('{');
+            if (firstBrace > 0) {
+                bleRxBuffer = bleRxBuffer.substring(firstBrace);
+            }
 
-            for (let i = 0; i < bleRxBuffer.length; i++) {
-                if (bleRxBuffer[i] === '{') {
-                    if (depth === 0) startIdx = i;
-                    depth++;
-                } else if (bleRxBuffer[i] === '}') {
-                    depth--;
-                    if (depth === 0 && startIdx !== -1) {
-                        const jsonStr = bleRxBuffer.substring(startIdx, i + 1);
-                        bleRxBuffer = bleRxBuffer.substring(i + 1);
-                        try {
-                            const data = JSON.parse(jsonStr);
-                            updateDashboard(data);
-                        } catch (e) {
-                            logConsole("BLE Parse Error: " + e.message);
+            while (true) {
+                let depth = 0;
+                let startIdx = -1;
+                let foundComplete = false;
+
+                for (let i = 0; i < bleRxBuffer.length; i++) {
+                    if (bleRxBuffer[i] === '{') {
+                        if (depth === 0) startIdx = i;
+                        depth++;
+                    } else if (bleRxBuffer[i] === '}') {
+                        depth--;
+                        if (depth === 0 && startIdx !== -1) {
+                            const jsonStr = bleRxBuffer.substring(startIdx, i + 1);
+                            bleRxBuffer = bleRxBuffer.substring(i + 1);
+                            foundComplete = true;
+                            try {
+                                const data = JSON.parse(jsonStr);
+                                if (data && typeof data === 'object') {
+                                    updateDashboard(data);
+                                }
+                            } catch (e) {
+                                logConsole("BLE Parse Error: " + e.message);
+                            }
+                            break;
                         }
-                        break;
                     }
                 }
+
+                if (!foundComplete) break;
             }
 
             if (bleRxBuffer.length > 2048) {
@@ -556,18 +570,21 @@
         }
 
         function updateDashboard(data) {
+            if (!data || typeof data !== 'object') return;
             lastRxTimestamp = Date.now();
 
-            const badge = document.getElementById('badgeState');
-            if (badge && data.state) {
-                badge.className = 'status-badge ' + data.state;
-                badge.innerText = data.state;
+            if (data.state && data.state.trim() !== '') {
+                const badge = document.getElementById('badgeState');
+                if (badge) {
+                    badge.className = 'status-badge ' + data.state;
+                    badge.innerText = data.state;
+                }
                 updateControlButtonsState(data.state);
             }
 
             // Beacon Battery
             const valBatt = document.getElementById('valBatt');
-            if (valBatt) {
+            if (valBatt && data.batt !== undefined) {
                 if (data.batt > 1.0) {
                     valBatt.innerText = data.batt.toFixed(2) + " V";
                 } else {
@@ -588,7 +605,7 @@
             }
 
             const valTimer = document.getElementById('valTimer');
-            if (valTimer) valTimer.innerText = formatTime(data.remaining_sec);
+            if (valTimer && data.remaining_sec !== undefined) valTimer.innerText = formatTime(data.remaining_sec);
 
             const valPkts = document.getElementById('valPkts');
             if (valPkts) valPkts.innerText = data.pkts || data.packet_count || 0;
@@ -630,7 +647,7 @@
                 }
             }
 
-            logConsole(`RX | Device: ${data.device || 'BLE'} | State: ${data.state}`);
+            logConsole(`RX | Device: ${data.device || 'BLE'} | State: ${data.state || 'N/A'}`);
         }
 
         // Toggle Payload Log Visibility

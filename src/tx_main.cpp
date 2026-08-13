@@ -92,6 +92,7 @@ float readTxBatteryVoltage() {
 }
 
 void broadcastBleTelemetry();
+void parseTelemetry(const String& jsonStr);
 
 class MyServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
@@ -105,25 +106,24 @@ class MyServerCallbacks: public BLEServerCallbacks {
     }
 };
 
-void transmitLoRaCommand(String msg) {
+void transmitLoRaCommand(String cmd) {
     radio.clearDio1Action();
-    int txRes = radio.transmit(msg);
-    Serial.printf("[Heltec V3 TX] %s (code: %d)\n", msg.c_str(), txRes);
+    int txRes = radio.transmit(cmd);
+    Serial.printf("[Heltec V3 TX] %s (code: %d)\n", cmd.c_str(), txRes);
     rxFlag = false;
     radio.setDio1Action(onDio1);
     radio.startReceive();
 }
 
-class MyCallbacks: public BLECharacteristicCallbacks {
-    void onWrite(BLECharacteristic *pCharacteristic) {
-        std::string rxValue = pCharacteristic->getValue();
-        if (rxValue.length() > 0) {
-            String input = String(rxValue.c_str());
-            input.trim();
-            if (input.startsWith("{")) {
-                pendingCommandToSend = input;
-                lastTxStatus = "BLE Cmd Queued";
-            }
+class MyCallbacks: public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic* pCharacteristic) {
+        std::string val = pCharacteristic->getValue();
+        String input = String(val.c_str());
+        input.trim();
+        Serial.println("[NimBLE onWrite] Received: " + input);
+        if (input.startsWith("{")) {
+            pendingCommandToSend = input;
+            lastTxStatus = "BLE Cmd Received";
         }
     }
 };
