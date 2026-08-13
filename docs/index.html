@@ -267,7 +267,7 @@
 <body>
     <header>
         <div class="header-title">
-            <h1>📡 Beacon Center <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.0.4</span></h1>
+            <h1>📡 Beacon Center <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.0.5</span></h1>
             <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
         </div>
         <div>
@@ -420,18 +420,12 @@
             try {
                 logConsole("Scanning Web Bluetooth devices...");
                 bleDevice = await navigator.bluetooth.requestDevice({
-                    filters: [
-                        { services: [NUS_SERVICE_UUID] },
-                        { namePrefix: 'Heltec', services: [NUS_SERVICE_UUID] },
-                        { namePrefix: 'RAK', services: [NUS_SERVICE_UUID] }
-                    ],
-                    optionalServices: [NUS_SERVICE_UUID]
-                }).catch(async (err) => {
-                    logConsole("Retrying with all devices search...");
-                    return await navigator.bluetooth.requestDevice({
-                        acceptAllDevices: true,
-                        optionalServices: [NUS_SERVICE_UUID]
-                    });
+                    acceptAllDevices: true,
+                    optionalServices: [
+                        NUS_SERVICE_UUID,
+                        '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
+                        '00006e40-0000-1000-8000-00805f9b34fb'
+                    ]
                 });
 
                 bleDevice.addEventListener('gattserverdisconnected', onDisconnected);

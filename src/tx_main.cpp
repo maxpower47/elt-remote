@@ -647,24 +647,24 @@ void setup() {
 
     pTxCharacteristic = pService->createCharacteristic(
                             CHARACTERISTIC_UUID_TX,
-                            BLECharacteristic::PROPERTY_NOTIFY
+                            BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
                         );
     pTxCharacteristic->addDescriptor(new BLE2902());
 
     BLECharacteristic *pRxCharacteristic = pService->createCharacteristic(
                                            CHARACTERISTIC_UUID_RX,
-                                           BLECharacteristic::PROPERTY_WRITE
+                                           BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR
                                        );
     pRxCharacteristic->setCallbacks(new MyCallbacks());
 
     pService->start();
 
-    BLEAdvertising *pAdvertising = pServer->getAdvertising();
-    pAdvertising->addServiceUUID(BLEUUID(SERVICE_UUID));
+    BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+    pAdvertising->addServiceUUID(SERVICE_UUID);
     pAdvertising->setScanResponse(true);
     pAdvertising->setMinPreferred(0x06);
     pAdvertising->setMinPreferred(0x12);
-    pAdvertising->start();
+    BLEDevice::startAdvertising();
 
     int state = radio.begin(915.0, 125.0, 7, 5, 0x34, 22, 8, 1.6, false);
     if (state == RADIOLIB_ERR_NONE) {
