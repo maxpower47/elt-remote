@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <!-- PWA Manifest & Theme -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="LoRa Beacon">
+    <!-- Leaflet CSS & JS for Map -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --panel-bg: #1e293b;
+            --accent-blue: #38bdf8;
+            --accent-green: #22c55e;
+            --accent-red: #ef4444;
+            --accent-orange: #f97316;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --border-color: #334155;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        header {
+            background-color: var(--panel-bg);
+            border-bottom: 1px solid var(--border-color);
+            padding: 12px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+            z-index: 1000;
+        }
+
+        .header-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .header-title h1 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .status-badge {
+            padding: 4px 10px;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            background: #334155;
+            color: var(--text-muted);
+        }
+
+        .status-badge.DISARMED { background: rgba(34, 197, 94, 0.15); color: var(--accent-green); border: 1px solid var(--accent-green); }
+        .status-badge.ARMED_TIMER { background: rgba(249, 115, 22, 0.15); color: var(--accent-orange); border: 1px solid var(--accent-orange); }
+        .status-badge.ACTIVE { background: rgba(239, 68, 68, 0.2); color: var(--accent-red); border: 1px solid var(--accent-red); animation: pulse 1.5s infinite; }
+        .status-badge.LOST_LINK { background: rgba(148, 163, 184, 0.15); color: var(--text-muted); border: 1px solid var(--border-color); }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .main-container {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+        }
+
+        /* Large View (Desktop / Tablet): Sidebar Left (380px), Map Right (1fr) */
+        @media (min-width: 900px) {
+            .main-container {
+                display: grid;
+                grid-template-columns: 380px 1fr;
+                height: calc(100vh - 60px);
+            }
+            .sidebar {
+                order: 1;
+            }
+            .map-wrapper {
+                order: 2;
+                height: 100%;
+            }
+        }
+
+        /* Mobile View: Sidebar Top, Map Bottom (Explicit height & position) */
+        @media (max-width: 899px) {
+            .sidebar {
+                order: 1;
+                border-right: none;
+                border-bottom: 1px solid var(--border-color);
+            }
+            .map-wrapper {
+                order: 2;
+                height: 350px;
+                min-height: 300px;
+                width: 100%;
+                position: relative;
+            }
+        }
+
+        .sidebar {
+            background-color: var(--panel-bg);
+            border-right: 1px solid var(--border-color);
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            overflow-y: auto;
+        }
+
+        .card {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 14px;
+        }
+
+        .card-title {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+
+        .stat-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .stat-box {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .stat-value {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+
+        .stat-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .btn-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .btn {
+            padding: 12px;
+            border-radius: 8px;
+            border: none;
+            font-weight: 600;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: transform 0.1s ease, background-color 0.2s ease;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            touch-action: manipulation;
+        }
+
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            pointer-events: none;
+            transform: none !important;
+        }
+
+        .timer-input-group input:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .btn-connect { background: var(--accent-blue); color: #0f172a; font-weight: 700; }
+        .btn-connect:hover { background: #7dd3fc; }
+
+        .btn-danger { background: var(--accent-red); color: white; }
+        .btn-danger:hover { background: #dc2626; }
+
+        .btn-success { background: var(--accent-green); color: white; }
+        .btn-success:hover { background: #16a34a; }
+
+        .btn-warning { background: var(--accent-orange); color: white; }
+        .btn-warning:hover { background: #ea580c; }
+
+        .timer-input-group {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .timer-input-group input {
+            width: 75px;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-color);
+            color: white;
+            font-size: 1rem;
+            font-weight: 700;
+            text-align: center;
+        }
+
+        .map-wrapper {
+            position: relative;
+            width: 100%;
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+            min-height: 300px;
+            background: #0f172a;
+            z-index: 1;
+        }
+
+        .console-log {
+            font-family: monospace;
+            font-size: 0.75rem;
+            background: #090d16;
+            color: var(--accent-blue);
+            padding: 10px;
+            border-radius: 8px;
+            height: 100px;
+            overflow-y: auto;
+            border: 1px solid var(--border-color);
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-title">
+            <h1>📡 Beacon Center</h1>
+            <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
+        </div>
+        <div>
+            <button id="btnConnectBle" class="btn btn-connect" onclick="toggleWebBluetooth()">📲 Connect BLE</button>
+        </div>
+    </header>
+
+    <div class="main-container">
+        <!-- Sidebar / Cards (Left in Desktop, Top in Mobile) -->
+        <div class="sidebar">
+            <!-- Bluetooth Connection Status -->
+            <div class="card">
+                <div class="card-title">Bluetooth Connection</div>
+                <div style="font-size: 0.85rem; color: var(--text-muted); display: flex; justify-content: space-between; flex-direction: column; gap: 4px;">
+                    <div>Target: <b id="lblDeviceName" style="color: var(--accent-blue);">None Connected</b></div>
+                    <div>BLE Status: <b id="lblBleStatus" style="color: var(--accent-red);">Disconnected</b></div>
+                </div>
+            </div>
+
+            <!-- Remote Controls -->
+            <div class="card">
+                <div class="card-title">Remote Control Panel</div>
+                <div class="btn-group">
+                    <button id="btnArmNow" class="btn btn-danger" onclick="sendCmd('ARM_NOW')">⚡ ARM IMMEDIATELY</button>
+                    <button id="btnDisarm" class="btn btn-success" onclick="sendCmd('DISARM')">🛡️ DISARM BEACON</button>
+                    
+                    <div style="margin-top: 6px;">
+                        <div class="stat-label" style="margin-bottom: 4px;">ARM WITH TIMER (HOURS)</div>
+                        <div class="timer-input-group">
+                            <input type="number" id="inputHours" value="1" min="1" max="72" inputmode="numeric">
+                            <button id="btnStartTimer" class="btn btn-warning" style="flex: 1;" onclick="sendArmTimer()">⏱️ START TIMER</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Telemetry Summary Card -->
+            <div class="card">
+                <div class="card-title">Device Batteries & Signal</div>
+                <div class="stat-grid">
+                    <div class="stat-box">
+                        <span id="valBatt" class="stat-value">-- V</span>
+                        <span class="stat-label">Beacon Battery</span>
+                    </div>
+                    <div class="stat-box">
+                        <span id="valTxBatt" class="stat-value">-- V</span>
+                        <span class="stat-label">Transmitter Batt</span>
+                    </div>
+                    <div class="stat-box" style="margin-top: 8px;">
+                        <span id="valTimer" class="stat-value">--:--</span>
+                        <span class="stat-label">Timer Remaining</span>
+                    </div>
+                    <div class="stat-box" style="margin-top: 8px;">
+                        <span id="valGpsFix" class="stat-value" style="font-size: 0.95rem; color: var(--accent-orange);">NO FIX</span>
+                        <span class="stat-label">GPS Status</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Position Coordinates -->
+            <div class="card">
+                <div class="card-title">GPS Coordinates</div>
+                <div style="font-size: 0.85rem; font-family: monospace;">
+                    Lat: <span id="txtLat" style="color: var(--accent-blue);">0.00000</span><br>
+                    Lon: <span id="txtLon" style="color: var(--accent-blue);">0.00000</span>
+                </div>
+            </div>
+
+            <!-- Live Payload Console -->
+            <div class="card">
+                <div class="card-title">Live Payload Log</div>
+                <div id="consoleLog" class="console-log">Click "Connect BLE" to pair with Heltec V3 or RAK4631...</div>
+            </div>
+        </div>
+
+        <!-- Map Container (Right in Desktop, Bottom in Mobile) -->
+        <div class="map-wrapper">
+            <div id="map"></div>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Nordic UART Service UUIDs (NUS)
+        const NUS_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+        const NUS_RX_UUID      = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+        const NUS_TX_UUID      = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+
+        let bleDevice = null;
+        let rxCharacteristic = null;
+        let txCharacteristic = null;
+        let lastRxTimestamp = 0;
+
+        // Initialize Map with explicit container sizing
+        let map, marker;
+        function initMap() {
+            map = L.map('map').setView([34.0522, -118.2437], 13);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '© OpenStreetMap'
+            }).addTo(map);
+
+            const beaconIcon = L.divIcon({
+                className: 'custom-beacon-icon',
+                html: '<div style="background:#ef4444; width:18px; height:18px; border-radius:50%; border:2px solid white; box-shadow:0 0 12px #ef4444;"></div>',
+                iconSize: [18, 18],
+                iconAnchor: [9, 9]
+            });
+
+            marker = L.marker([34.0522, -118.2437], {icon: beaconIcon}).addTo(map)
+                .bindPopup("<b>RAK4631 Beacon</b><br>State: Waiting...");
+
+            // Initialize control buttons to disabled state until BLE connects
+            updateControlButtonsState('DISCONNECTED');
+
+            // Trigger Leaflet internal recalculation
+            setTimeout(() => { map.invalidateSize(); }, 300);
+        }
+
+        window.addEventListener('load', initMap);
+        window.addEventListener('resize', () => { if (map) map.invalidateSize(); });
+
+        function logConsole(msg) {
+            const el = document.getElementById('consoleLog');
+            const timeStr = new Date().toLocaleTimeString();
+            el.innerHTML = `[${timeStr}] ${msg}<br>` + el.innerHTML;
+        }
+
+        function formatTime(totalSec) {
+            if (!totalSec || totalSec <= 0) return "--:--";
+            const hrs = Math.floor(totalSec / 3600);
+            const mins = Math.floor((totalSec % 3600) / 60);
+            const secs = totalSec % 60;
+            if (hrs > 0) return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        async function toggleWebBluetooth() {
+            if (!navigator.bluetooth) {
+                alert("Web Bluetooth API is not supported in this browser. Please use Chrome, Edge, or Bluefy on iOS.");
+                return;
+            }
+
+            if (bleDevice && bleDevice.gatt.connected) {
+                bleDevice.gatt.disconnect();
+                return;
+            }
+
+            try {
+                logConsole("Requesting Web Bluetooth device...");
+                bleDevice = await navigator.bluetooth.requestDevice({
+                    filters: [
+                        { namePrefix: 'Heltec_V3' },
+                        { namePrefix: 'RAK4631' }
+                    ],
+                    optionalServices: [NUS_SERVICE_UUID]
+                });
+
+                bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
+
+                logConsole(`Connecting GATT (${bleDevice.name})...`);
+                const server = await bleDevice.gatt.connect();
+
+                logConsole("Getting Nordic UART Service...");
+                const service = await server.getPrimaryService(NUS_SERVICE_UUID);
+
+                logConsole("Getting Characteristics...");
+                txCharacteristic = await service.getCharacteristic(NUS_TX_UUID);
+                rxCharacteristic = await service.getCharacteristic(NUS_RX_UUID);
+
+                await txCharacteristic.startNotifications();
+                txCharacteristic.addEventListener('characteristicvaluechanged', handleBleNotification);
+
+                document.getElementById('lblDeviceName').innerText = bleDevice.name;
+                document.getElementById('lblBleStatus').innerText = "Connected";
+                document.getElementById('lblBleStatus').style.color = "var(--accent-green)";
+                document.getElementById('btnConnectBle').innerText = "❌ Disconnect BLE";
+                
+                // Enable control buttons immediately on BLE GATT connection
+                updateControlButtonsState('INITIAL_CONNECT');
+                logConsole(`Connected OK to ${bleDevice.name}! Listening...`);
+
+            } catch (err) {
+                logConsole("BLE Error: " + err.message);
+            }
+        }
+
+        let currentBeaconState = 'UNKNOWN';
+
+        function updateControlButtonsState(state) {
+            if (state && state !== 'INITIAL_CONNECT' && state !== 'DISCONNECTED') {
+                currentBeaconState = String(state).trim().toUpperCase();
+            }
+
+            const btnArmNow = document.getElementById('btnArmNow');
+            const btnDisarm = document.getElementById('btnDisarm');
+            const btnStartTimer = document.getElementById('btnStartTimer');
+            const inputHours = document.getElementById('inputHours');
+
+            const isConnected = (bleDevice && bleDevice.gatt && bleDevice.gatt.connected);
+
+            if (!isConnected) {
+                btnArmNow.disabled = true;
+                btnDisarm.disabled = true;
+                btnStartTimer.disabled = true;
+                inputHours.disabled = true;
+                return;
+            }
+
+            // Connected: Enable controls
+            inputHours.disabled = false;
+            btnStartTimer.disabled = false;
+
+            const cleanState = currentBeaconState;
+
+            if (cleanState === 'DISARMED') {
+                btnArmNow.disabled = false;
+                btnDisarm.disabled = true; // Disabled because already disarmed
+            } else if (cleanState === 'ACTIVE') {
+                btnArmNow.disabled = true; // Disabled because already active
+                btnDisarm.disabled = false;
+            } else if (cleanState === 'ARMED_TIMER') {
+                btnArmNow.disabled = false;
+                btnDisarm.disabled = false;
+            } else {
+                // Default / Initial connection / Waiting for first packet
+                btnArmNow.disabled = false;
+                btnDisarm.disabled = true; // Default to disarm disabled until active/armed state confirmed
+            }
+        }
+
+        function onDisconnected() {
+            document.getElementById('lblDeviceName').innerText = "None Connected";
+            document.getElementById('lblBleStatus').innerText = "Disconnected";
+            document.getElementById('lblBleStatus').style.color = "var(--accent-red)";
+            document.getElementById('btnConnectBle').innerText = "📲 Connect BLE";
+            updateControlButtonsState('DISCONNECTED');
+            logConsole("BLE Device Disconnected.");
+        }
+
+        function handleBleNotification(event) {
+            const value = event.target.value;
+            const decoder = new TextDecoder('utf-8');
+            const jsonStr = decoder.decode(value).trim();
+
+            try {
+                const data = JSON.parse(jsonStr);
+                updateDashboard(data);
+            } catch (e) {
+                logConsole("BLE RX Raw: " + jsonStr);
+            }
+        }
+
+        function updateDashboard(data) {
+            lastRxTimestamp = Date.now();
+
+            const badge = document.getElementById('badgeState');
+            badge.className = 'status-badge ' + data.state;
+            badge.innerText = data.state;
+
+            updateControlButtonsState(data.state);
+
+            // Beacon Battery
+            const valBatt = document.getElementById('valBatt');
+            if (data.batt > 1.0) {
+                valBatt.innerText = data.batt.toFixed(2) + " V";
+            } else {
+                valBatt.innerText = "USB Power";
+            }
+
+            // Transmitter Battery
+            const valTxBatt = document.getElementById('valTxBatt');
+            if (data.tx_batt && data.tx_batt > 1.0) {
+                valTxBatt.innerText = data.tx_batt.toFixed(2) + " V";
+            } else if (data.tx_batt !== undefined) {
+                valTxBatt.innerText = "USB Power";
+            } else {
+                valTxBatt.innerText = "N/A";
+            }
+
+            document.getElementById('valTimer').innerText = formatTime(data.remaining_sec);
+            document.getElementById('valPkts').innerText = data.pkts || data.packet_count || 0;
+
+            if (data.gps) {
+                document.getElementById('txtLat').innerText = data.gps.lat.toFixed(5);
+                document.getElementById('txtLon').innerText = data.gps.lon.toFixed(5);
+                const gpsFix = document.getElementById('valGpsFix');
+                if (data.gps.valid) {
+                    gpsFix.innerText = "VALID FIX";
+                    gpsFix.style.color = "var(--accent-green)";
+                    const pos = [data.gps.lat, data.gps.lon];
+                    marker.setLatLng(pos);
+                    map.panTo(pos);
+                } else {
+                    gpsFix.innerText = "NO FIX";
+                    gpsFix.style.color = "var(--accent-orange)";
+                }
+            }
+
+            logConsole(`RX | Device: ${data.device || 'BLE'} | State: ${data.state}`);
+        }
+
+        async function sendCmd(cmdName, params = {}) {
+            if (!rxCharacteristic) {
+                alert("Please click 'Connect BLE' first!");
+                return;
+            }
+            const body = { cmd: cmdName, ...params };
+            const payloadStr = JSON.stringify(body);
+
+            try {
+                const encoder = new TextEncoder();
+                await rxCharacteristic.writeValue(encoder.encode(payloadStr));
+                logConsole(`Sent BLE: ${payloadStr}`);
+            } catch (err) {
+                logConsole(`BLE TX Error: ${err.message}`);
+            }
+        }
+
+        function sendArmTimer() {
+            const hrs = parseInt(document.getElementById('inputHours').value) || 1;
+            const sec = hrs * 3600;
+            sendCmd('ARM_TIMER', { sec: sec });
+        }
+
+        setInterval(() => {
+            if (lastRxTimestamp > 0 && (Date.now() - lastRxTimestamp > 30000)) {
+                document.getElementById('badgeState').className = "status-badge LOST_LINK";
+                document.getElementById('badgeState').innerText = "LOST LINK";
+            }
+        }, 1000);
+
+        // Register PWA Service Worker for 100% Offline Capability
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then((reg) => logConsole(`[PWA] Offline ServiceWorker active: ${reg.scope}`))
+                    .catch((err) => logConsole(`[PWA] SW Reg Failed: ${err.message}`));
+            });
+        }
+    </script>
+</body>
+</html>

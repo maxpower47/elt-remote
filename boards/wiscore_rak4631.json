@@ -1,0 +1,47 @@
+{
+  "build": {
+    "arduino": {
+      "ldscript": "nrf52840_s140_v6.ld"
+    },
+    "core": "adafruit",
+    "cpu": "cortex-m4",
+    "extra_flags": "-DNRF52840_XXAA -DARDUINO_NRF52840_FEATHER -DNRF52_SERIES -D_VARIANT_RAK4630_ -DRAK4630",
+    "f_cpu": "64000000L",
+    "mcu": "nrf52840",
+    "softdevice": {
+      "sd_flags": "-DS140",
+      "sd_name": "s140",
+      "sd_version": "6.1.1",
+      "sd_fwid": "0x00B6"
+    },
+    "variant": "wiscore_rak4631",
+    "variant_h": "variant.h"
+  },
+  "connectivity": [
+    "bluetooth"
+  ],
+  "debug": {
+    "jlink_device": "nRF52840_xxAA",
+    "onboard_tools": [
+      "cmsis-dap"
+    ]
+  },
+  "frameworks": [
+    "arduino"
+  ],
+  "name": "RAKwireless WisBlock Core RAK4631",
+  "upload": {
+    "maximum_ram_size": 248832,
+    "maximum_size": 815104,
+    "protocol": "nrfutil",
+    "protocols": [
+      "jlink",
+      "nrfutil",
+      "cmsis-dap"
+    ],
+    "use_1200bps_touch": true,
+    "wait_for_upload_port": true
+  },
+  "url": "https://docs.rakwireless.com/Product-Categories/WisBlock/RAK4631/Overview/",
+  "vendor": "RAKwireless"
+}
