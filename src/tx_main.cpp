@@ -659,12 +659,12 @@ void setup() {
 
     pService->start();
 
-    BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-    pAdvertising->addServiceUUID(SERVICE_UUID);
+    BLEAdvertising *pAdvertising = pServer->getAdvertising();
+    pAdvertising->addServiceUUID(BLEUUID(SERVICE_UUID));
     pAdvertising->setScanResponse(true);
-    pAdvertising->setMinPreferred(0x06); // Functions for iPhone connections
+    pAdvertising->setMinPreferred(0x06);
     pAdvertising->setMinPreferred(0x12);
-    BLEDevice::startAdvertising();
+    pAdvertising->start();
 
     int state = radio.begin(915.0, 125.0, 7, 5, 0x34, 22, 8, 1.6, false);
     if (state == RADIOLIB_ERR_NONE) {
