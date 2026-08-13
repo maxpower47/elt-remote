@@ -658,7 +658,13 @@ void setup() {
     pRxCharacteristic->setCallbacks(new MyCallbacks());
 
     pService->start();
-    pServer->getAdvertising()->start();
+
+    BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+    pAdvertising->addServiceUUID(SERVICE_UUID);
+    pAdvertising->setScanResponse(true);
+    pAdvertising->setMinPreferred(0x06); // Functions for iPhone connections
+    pAdvertising->setMinPreferred(0x12);
+    BLEDevice::startAdvertising();
 
     int state = radio.begin(915.0, 125.0, 7, 5, 0x34, 22, 8, 1.6, false);
     if (state == RADIOLIB_ERR_NONE) {
