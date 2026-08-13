@@ -267,7 +267,7 @@
 <body>
     <header>
         <div class="header-title">
-            <h1>📡 Beacon Center <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.1.7</span></h1>
+            <h1>📡 Beacon Center <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.1.8</span></h1>
             <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
         </div>
         <div>
@@ -549,45 +549,62 @@
             lastRxTimestamp = Date.now();
 
             const badge = document.getElementById('badgeState');
-            badge.className = 'status-badge ' + data.state;
-            badge.innerText = data.state;
+            if (badge && data.state) {
+                badge.className = 'status-badge ' + data.state;
+                badge.innerText = data.state;
+            }
 
             updateControlButtonsState(data.state);
 
             // Beacon Battery
             const valBatt = document.getElementById('valBatt');
-            if (data.batt > 1.0) {
-                valBatt.innerText = data.batt.toFixed(2) + " V";
-            } else {
-                valBatt.innerText = "USB Power";
+            if (valBatt) {
+                if (data.batt > 1.0) {
+                    valBatt.innerText = data.batt.toFixed(2) + " V";
+                } else {
+                    valBatt.innerText = "USB Power";
+                }
             }
 
             // Transmitter Battery
             const valTxBatt = document.getElementById('valTxBatt');
-            if (data.tx_batt && data.tx_batt > 1.0) {
-                valTxBatt.innerText = data.tx_batt.toFixed(2) + " V";
-            } else if (data.tx_batt !== undefined) {
-                valTxBatt.innerText = "USB Power";
-            } else {
-                valTxBatt.innerText = "N/A";
+            if (valTxBatt) {
+                if (data.tx_batt && data.tx_batt > 1.0) {
+                    valTxBatt.innerText = data.tx_batt.toFixed(2) + " V";
+                } else if (data.tx_batt !== undefined) {
+                    valTxBatt.innerText = "USB Power";
+                } else {
+                    valTxBatt.innerText = "N/A";
+                }
             }
 
-            document.getElementById('valTimer').innerText = formatTime(data.remaining_sec);
-            document.getElementById('valPkts').innerText = data.pkts || data.packet_count || 0;
+            const valTimer = document.getElementById('valTimer');
+            if (valTimer) valTimer.innerText = formatTime(data.remaining_sec);
+
+            const valPkts = document.getElementById('valPkts');
+            if (valPkts) valPkts.innerText = data.pkts || data.packet_count || 0;
 
             if (data.gps) {
-                document.getElementById('txtLat').innerText = data.gps.lat.toFixed(5);
-                document.getElementById('txtLon').innerText = data.gps.lon.toFixed(5);
+                const txtLat = document.getElementById('txtLat');
+                if (txtLat) txtLat.innerText = Number(data.gps.lat).toFixed(5);
+
+                const txtLon = document.getElementById('txtLon');
+                if (txtLon) txtLon.innerText = Number(data.gps.lon).toFixed(5);
+
                 const gpsFix = document.getElementById('valGpsFix');
-                if (data.gps.valid) {
-                    gpsFix.innerText = "VALID FIX";
-                    gpsFix.style.color = "var(--accent-green)";
-                    const pos = [data.gps.lat, data.gps.lon];
-                    marker.setLatLng(pos);
-                    map.panTo(pos);
-                } else {
-                    gpsFix.innerText = "NO FIX";
-                    gpsFix.style.color = "var(--accent-orange)";
+                if (gpsFix) {
+                    if (data.gps.valid) {
+                        gpsFix.innerText = "VALID FIX";
+                        gpsFix.style.color = "var(--accent-green)";
+                        if (marker && map) {
+                            const pos = [data.gps.lat, data.gps.lon];
+                            marker.setLatLng(pos);
+                            map.panTo(pos);
+                        }
+                    } else {
+                        gpsFix.innerText = "NO FIX";
+                        gpsFix.style.color = "var(--accent-orange)";
+                    }
                 }
             }
 

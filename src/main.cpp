@@ -266,7 +266,7 @@ String generateTelemetry() {
     updateTimerState();
     batteryVoltage = readBatteryVoltage();
 
-    StaticJsonDocument<256> doc;
+    StaticJsonDocument<512> doc;
     doc["type"] = "TELEMETRY";
     doc["device"] = "RAK4631_BEACON";
     switch (currentState) {
@@ -283,8 +283,15 @@ String generateTelemetry() {
 void broadcastBleTelemetry() {
     if (Bluefruit.connected()) {
         String payload = generateTelemetry() + "\n";
-        bleuart.write((const uint8_t*)payload.c_str(), payload.length());
-        bleuart.flush();
+        int len = payload.length();
+        int offset = 0;
+        while (offset < len) {
+            int chunkSize = min(20, len - offset);
+            bleuart.write((const uint8_t*)(payload.c_str() + offset), chunkSize);
+            bleuart.flush();
+            offset += chunkSize;
+            delay(15);
+        }
     }
 }
 
@@ -388,8 +395,8 @@ void loop() {
         delay(80);
         ledSet(HW_LED_GREEN, false);
 
-        if (Bluefruit.connected() && bleuart.notifyEnabled()) {
-            bleuart.write((const uint8_t*)payload.c_str(), payload.length());
+        if (Bluefruit.connected()) {
+            broadcastBleTelemetry();
         }
 
         if (txState == RADIOLIB_ERR_NONE)  Serial.println("[TX] " + payload);

@@ -214,7 +214,7 @@ void addRssiSample(int rssi) {
 
 void broadcastBleTelemetry() {
     if (deviceConnected && pTxCharacteristic) {
-        StaticJsonDocument<384> bleDoc;
+        StaticJsonDocument<512> bleDoc;
         bleDoc["type"] = "TELEMETRY";
         bleDoc["device"] = "HELTEC_V3_TX";
         bleDoc["state"] = beaconState;
