@@ -639,32 +639,41 @@ void setup() {
     display.setFont(ArialMT_Plain_10);
     updateOLED();
 
-    BLEDevice::init("Heltec_V3_Remote");
+    BLEDevice::init("Heltec_V3");
     pServer = BLEDevice::createServer();
     pServer->setCallbacks(new MyServerCallbacks());
 
-    BLEService *pService = pServer->createService(BLEUUID(SERVICE_UUID));
+    BLEService *pService = pServer->createService(SERVICE_UUID);
 
     pTxCharacteristic = pService->createCharacteristic(
-                            BLEUUID(CHARACTERISTIC_UUID_TX),
-                            BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
+                            CHARACTERISTIC_UUID_TX,
+                            BLECharacteristic::PROPERTY_NOTIFY
                         );
     pTxCharacteristic->addDescriptor(new BLE2902());
 
     BLECharacteristic *pRxCharacteristic = pService->createCharacteristic(
-                                           BLEUUID(CHARACTERISTIC_UUID_RX),
+                                           CHARACTERISTIC_UUID_RX,
                                            BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR
                                        );
     pRxCharacteristic->setCallbacks(new MyCallbacks());
 
     pService->start();
 
-    BLEAdvertising *pAdvertising = pServer->getAdvertising();
-    pAdvertising->addServiceUUID(BLEUUID(SERVICE_UUID));
-    pAdvertising->setScanResponse(true);
+    BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+    
+    BLEAdvertisementData oAdvertisementData = BLEAdvertisementData();
+    oAdvertisementData.setFlags(0x06); // GENERAL_DISC_MODE | BREDR_NOT_SPT
+    oAdvertisementData.setCompleteServices(BLEUUID(SERVICE_UUID));
+    oAdvertisementData.setName("Heltec_V3");
+    
+    BLEAdvertisementData oScanResponseData = BLEAdvertisementData();
+    oScanResponseData.setCompleteServices(BLEUUID(SERVICE_UUID));
+    
+    pAdvertising->setAdvertisementData(oAdvertisementData);
+    pAdvertising->setScanResponseData(oScanResponseData);
     pAdvertising->setMinPreferred(0x06);
     pAdvertising->setMinPreferred(0x12);
-    pAdvertising->start();
+    BLEDevice::startAdvertising();
 
     int state = radio.begin(915.0, 125.0, 7, 5, 0x34, 22, 8, 1.6, false);
     if (state == RADIOLIB_ERR_NONE) {

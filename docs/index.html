@@ -267,7 +267,7 @@
 <body>
     <header>
         <div class="header-title">
-            <h1>📡 Beacon Center <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.0.7</span></h1>
+            <h1>📡 Beacon Center <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.0.8</span></h1>
             <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
         </div>
         <div>
@@ -436,25 +436,33 @@
                 logConsole(`Connecting GATT (${bleDevice.name})...`);
                 const server = await bleDevice.gatt.connect();
 
-                logConsole("Getting Nordic UART Service...");
+                logConsole("Discovering primary services...");
+                let services = [];
+                try {
+                    services = await server.getPrimaryServices();
+                    logConsole(`Found ${services.length} services: ` + services.map(s => s.uuid).join(", "));
+                } catch (sErr) {
+                    logConsole(`getPrimaryServices error: ${sErr.message}`);
+                }
+
                 let service;
                 try {
                     service = await server.getPrimaryService(NUS_SERVICE_UUID);
                 } catch (svcErr) {
-                    logConsole("Searching primary services fallback...");
-                    const services = await server.getPrimaryServices();
                     service = services.find(s => s.uuid.toLowerCase() === NUS_SERVICE_UUID.toLowerCase());
                     if (!service && services.length > 0) {
-                        service = services[0]; // Fallback to first available primary service
+                        service = services[0];
                     }
                 }
 
                 if (!service) {
-                    throw new Error("No matching Nordic UART Service found on device.");
+                    throw new Error(`No NUS service match. Discovered UUIDs: ${services.map(s => s.uuid).join(", ")}`);
                 }
 
-                logConsole(`Using Service: ${service.uuid}`);
+                logConsole(`Bound to Service: ${service.uuid}`);
                 const characteristics = await service.getCharacteristics();
+                logConsole(`Found ${characteristics.length} chars: ` + characteristics.map(c => c.uuid).join(", "));
+
                 txCharacteristic = characteristics.find(c => c.uuid.toLowerCase() === NUS_TX_UUID.toLowerCase()) || characteristics[0];
                 rxCharacteristic = characteristics.find(c => c.uuid.toLowerCase() === NUS_RX_UUID.toLowerCase()) || characteristics[1] || characteristics[0];
 
