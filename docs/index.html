@@ -269,7 +269,7 @@
     <header>
         <div class="header-title">
             <h1>📡 Beacon Center</h1>
-            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.2.8</span>
+            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.2.9</span>
             <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
         </div>
         <button id="btnConnectBle" class="btn btn-connect" onclick="toggleWebBluetooth()">📲 Connect BLE</button>
@@ -524,48 +524,33 @@
             const value = event.target.value;
             const decoder = new TextDecoder('utf-8');
             const str = decoder.decode(value);
-            logConsole("BLE Event (" + value.byteLength + "b): " + str);
             bleRxBuffer += str;
 
-            // Trim leading non-JSON characters
-            let firstBrace = bleRxBuffer.indexOf('{');
-            if (firstBrace > 0) {
-                bleRxBuffer = bleRxBuffer.substring(firstBrace);
-            }
+            let lines = bleRxBuffer.split('\n');
+            // Keep the last incomplete fragment in bleRxBuffer
+            bleRxBuffer = lines.pop();
 
-            while (true) {
-                let depth = 0;
-                let startIdx = -1;
-                let foundComplete = false;
+            for (let line of lines) {
+                line = line.trim();
+                if (line.length === 0) continue;
 
-                for (let i = 0; i < bleRxBuffer.length; i++) {
-                    if (bleRxBuffer[i] === '{') {
-                        if (depth === 0) startIdx = i;
-                        depth++;
-                    } else if (bleRxBuffer[i] === '}') {
-                        depth--;
-                        if (depth === 0 && startIdx !== -1) {
-                            const jsonStr = bleRxBuffer.substring(startIdx, i + 1);
-                            bleRxBuffer = bleRxBuffer.substring(i + 1);
-                            foundComplete = true;
-                            try {
-                                const data = JSON.parse(jsonStr);
-                                if (data && typeof data === 'object') {
-                                    updateDashboard(data);
-                                }
-                            } catch (e) {
-                                logConsole("BLE Parse Error: " + e.message);
-                            }
-                            break;
+                let firstBrace = line.indexOf('{');
+                let lastBrace = line.lastIndexOf('}');
+                if (firstBrace !== -1 && lastBrace > firstBrace) {
+                    const jsonStr = line.substring(firstBrace, lastBrace + 1);
+                    try {
+                        const data = JSON.parse(jsonStr);
+                        if (data && typeof data === 'object') {
+                            updateDashboard(data);
                         }
+                    } catch (e) {
+                        logConsole("BLE Parse Error [" + e.message + "]: " + jsonStr);
                     }
                 }
-
-                if (!foundComplete) break;
             }
 
             if (bleRxBuffer.length > 2048) {
-                bleRxBuffer = ""; // Reset safety limit
+                bleRxBuffer = ""; // Safety reset
             }
         }
 
