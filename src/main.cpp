@@ -249,6 +249,13 @@ void parseCommand(const String& cmdStr) {
             saveStateToNVM();
             Serial.printf("[RAK4631] Command Received: ARM_TIMER (%ds)\n", armTimerDurationSec);
         }
+
+        // Transmit immediate telemetry update back over LoRa & BLE
+        delay(50);
+        String payload = generateTelemetry();
+        radio.transmit(payload);
+        rxFlag = false;
+        radio.startReceive();
     }
 }
 

@@ -267,7 +267,7 @@
 <body>
     <header>
         <div class="header-title">
-            <h1>📡 Beacon Center <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.1.1</span></h1>
+            <h1>📡 Beacon Center <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.1.2</span></h1>
             <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
         </div>
         <div>
@@ -580,7 +580,29 @@
 
             try {
                 const encoder = new TextEncoder();
-                await rxCharacteristic.writeValue(encoder.encode(payloadStr));
+                const data = encoder.encode(payloadStr);
+                
+                if (rxCharacteristic.writeValueWithoutResponse) {
+                    await rxCharacteristic.writeValueWithoutResponse(data);
+                } else if (rxCharacteristic.writeValueWithResponse) {
+                    await rxCharacteristic.writeValueWithResponse(data);
+                } else {
+                    await rxCharacteristic.writeValue(data);
+                }
+
+                // Optimistic UI state update
+                const badge = document.getElementById('badgeState');
+                if (cmdName === 'ARM_NOW') {
+                    badge.className = 'status-badge ACTIVE';
+                    badge.innerText = 'ARMING...';
+                } else if (cmdName === 'DISARM') {
+                    badge.className = 'status-badge DISARMED';
+                    badge.innerText = 'DISARMING...';
+                } else if (cmdName === 'ARM_TIMER') {
+                    badge.className = 'status-badge ARMED_TIMER';
+                    badge.innerText = 'SETTING TIMER...';
+                }
+
                 logConsole(`Sent BLE: ${payloadStr}`);
             } catch (err) {
                 logConsole(`BLE TX Error: ${err.message}`);
