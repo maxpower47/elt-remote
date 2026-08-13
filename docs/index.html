@@ -269,7 +269,7 @@
     <header>
         <div class="header-title">
             <h1>📡 Beacon Center</h1>
-            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.2.5</span>
+            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.2.6</span>
             <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
         </div>
         <button id="btnConnectBle" class="btn btn-connect" onclick="toggleWebBluetooth()">📲 Connect BLE</button>
@@ -573,13 +573,16 @@
             if (!data || typeof data !== 'object') return;
             lastRxTimestamp = Date.now();
 
-            if (data.state && data.state.trim() !== '') {
+            if (data.state && String(data.state).trim() !== '') {
+                const cleanState = String(data.state).trim().toUpperCase();
+                currentBeaconState = cleanState;
+
                 const badge = document.getElementById('badgeState');
                 if (badge) {
-                    badge.className = 'status-badge ' + data.state;
-                    badge.innerText = data.state;
+                    badge.className = 'status-badge ' + cleanState;
+                    badge.innerText = cleanState;
                 }
-                updateControlButtonsState(data.state);
+                updateControlButtonsState(cleanState);
             }
 
             // Beacon Battery
