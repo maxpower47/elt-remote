@@ -700,14 +700,13 @@ void setup() {
 
 void loop() {
     handleButton();
-    static uint32_t lastPingTime = 0;
 
-    // Transmit pending BLE or menu commands over LoRa immediately in main loop context (SPI safe)
+    // Transmit pending BLE or menu commands over LoRa immediately in main loop context
     if (pendingCommandToSend.length() > 0) {
         String txMsg = pendingCommandToSend;
         pendingCommandToSend = "";
         lastTxStatus = txMsg;
-        lastPingTime = millis(); // Reset ping timer so ping doesn't collide
+        
         transmitLoRaCommand(txMsg);
     }
 
@@ -721,13 +720,6 @@ void loop() {
             parseTelemetry(str);
             Serial.println("[Heltec V3 RX] " + str);
         }
-    }
-
-    if (millis() - lastPingTime > 3000) {
-        lastPingTime = millis();
-        txBatt = readTxBatteryVoltage();
-        lastTxStatus = "PING OK";
-        transmitLoRaCommand("{\"cmd\":\"PING\"}");
     }
 
     updateOLED();

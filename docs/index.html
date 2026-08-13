@@ -267,12 +267,11 @@
 <body>
     <header>
         <div class="header-title">
-            <h1>📡 Beacon Center <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.2.1</span></h1>
+            <h1>📡 Beacon Center</h1>
+            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.2.2</span>
             <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
         </div>
-        <div>
-            <button id="btnConnectBle" class="btn btn-connect" onclick="toggleWebBluetooth()">📲 Connect BLE</button>
-        </div>
+        <button id="btnConnectBle" class="btn btn-connect" onclick="toggleWebBluetooth()">📲 Connect BLE</button>
     </header>
 
     <div class="main-container">
@@ -329,17 +328,27 @@
 
             <!-- Position Coordinates -->
             <div class="card">
-                <div class="card-title">GPS Coordinates</div>
-                <div style="font-size: 0.85rem; font-family: monospace;">
-                    Lat: <span id="txtLat" style="color: var(--accent-blue);">0.00000</span><br>
-                    Lon: <span id="txtLon" style="color: var(--accent-blue);">0.00000</span>
+                <div class="card-title">GPS Location & Bearings</div>
+                <div style="font-size: 0.85rem; font-family: monospace; line-height: 1.6;">
+                    <div><b>Lat:</b> <span id="txtDmsLat" style="color: var(--accent-blue);">--°--'--"N</span></div>
+                    <div><b>Lon:</b> <span id="txtDmsLon" style="color: var(--accent-blue);">--°--'--"W</span></div>
+                    <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px;">Dec: <span id="txtLat">0.00000</span>, <span id="txtLon">0.00000</span></div>
+                    <div style="border-top: 1px solid var(--border-color); padding-top: 4px; display: flex; justify-content: space-between;">
+                        <div>Dist: <b id="txtDistance" style="color: var(--accent-green);">--</b></div>
+                        <div>Heading: <b id="txtHeading" style="color: var(--accent-orange);">--</b></div>
+                    </div>
                 </div>
             </div>
 
-            <!-- Live Payload Console -->
+            <!-- Live Payload Console (Collapsible & Hidden by default) -->
             <div class="card">
-                <div class="card-title">Live Payload Log</div>
-                <div id="consoleLog" class="console-log">Click "Connect BLE" to pair with Heltec V3 or RAK4631...</div>
+                <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="toggleConsoleLog()">
+                    <span>Live Payload Log</span>
+                    <span id="lblToggleConsole" style="font-size: 0.75rem; color: var(--accent-blue); text-decoration: underline;">▶ Show Log</span>
+                </div>
+                <div id="consoleLogWrapper" style="display: none; margin-top: 6px;">
+                    <div id="consoleLog" class="console-log">Click "Connect BLE" to pair with Heltec V3 or RAK4631...</div>
+                </div>
             </div>
         </div>
 
@@ -584,11 +593,24 @@
             if (valPkts) valPkts.innerText = data.pkts || data.packet_count || 0;
 
             if (data.gps) {
+                const latVal = Number(data.gps.lat);
+                const lonVal = Number(data.gps.lon);
+
                 const txtLat = document.getElementById('txtLat');
-                if (txtLat) txtLat.innerText = Number(data.gps.lat).toFixed(5);
+                if (txtLat) txtLat.innerText = latVal.toFixed(5);
 
                 const txtLon = document.getElementById('txtLon');
-                if (txtLon) txtLon.innerText = Number(data.gps.lon).toFixed(5);
+                if (txtLon) txtLon.innerText = lonVal.toFixed(5);
+
+                const txtDmsLat = document.getElementById('txtDmsLat');
+                if (txtDmsLat) txtDmsLat.innerText = decimalToDMS(latVal, true);
+
+                const txtDmsLon = document.getElementById('txtDmsLon');
+                if (txtDmsLon) txtDmsLon.innerText = decimalToDMS(lonVal, false);
+
+                currentBeaconLat = latVal;
+                currentBeaconLon = lonVal;
+                updateRelativeLocation();
 
                 const gpsFix = document.getElementById('valGpsFix');
                 if (gpsFix) {
@@ -596,7 +618,7 @@
                         gpsFix.innerText = "VALID FIX";
                         gpsFix.style.color = "var(--accent-green)";
                         if (marker && map) {
-                            const pos = [data.gps.lat, data.gps.lon];
+                            const pos = [latVal, lonVal];
                             marker.setLatLng(pos);
                             map.panTo(pos);
                         }
@@ -608,6 +630,91 @@
             }
 
             logConsole(`RX | Device: ${data.device || 'BLE'} | State: ${data.state}`);
+        }
+
+        // Toggle Payload Log Visibility
+        function toggleConsoleLog() {
+            const wrapper = document.getElementById('consoleLogWrapper');
+            const btn = document.getElementById('lblToggleConsole');
+            if (wrapper.style.display === 'none') {
+                wrapper.style.display = 'block';
+                btn.innerText = '▼ Hide Log';
+            } else {
+                wrapper.style.display = 'none';
+                btn.innerText = '▶ Show Log';
+            }
+        }
+
+        // Decimal Degrees to Deg Min Sec (DMS) Format
+        function decimalToDMS(val, isLat) {
+            if (val === 0 || val === undefined || isNaN(val)) return "--°--'--\"";
+            const dir = isLat ? (val >= 0 ? 'N' : 'S') : (val >= 0 ? 'E' : 'W');
+            const absVal = Math.abs(val);
+            const deg = Math.floor(absVal);
+            const remainderMins = (absVal - deg) * 60;
+            const mins = Math.floor(remainderMins);
+            const secs = ((remainderMins - mins) * 60).toFixed(1);
+            return `${deg}°${String(mins).padStart(2, '0')}'${String(secs).padStart(4, '0')}"${dir}`;
+        }
+
+        // Calculate Distance in meters between two lat/lon pairs
+        function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
+            if (!lat1 || !lat2 || lat1 === 0 || lat2 === 0) return null;
+            const R = 6371000;
+            const rad = Math.PI / 180;
+            const dLat = (lat2 - lat1) * rad;
+            const dLon = (lon2 - lon1) * rad;
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                      Math.cos(lat1 * rad) * Math.cos(lat2 * rad) *
+                      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return R * c;
+        }
+
+        // Calculate Compass Heading / Bearing in degrees & cardinal
+        function calculateBearing(lat1, lon1, lat2, lon2) {
+            if (!lat1 || !lat2 || lat1 === 0 || lat2 === 0) return null;
+            const rad = Math.PI / 180;
+            const y = Math.sin((lon2 - lon1) * rad) * Math.cos(lat2 * rad);
+            const x = Math.cos(lat1 * rad) * Math.sin(lat2 * rad) -
+                      Math.sin(lat1 * rad) * Math.cos(lat2 * rad) * Math.cos((lon2 - lon1) * rad);
+            let brng = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+            
+            const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+            const dirIdx = Math.round(brng / 45) % 8;
+            return `${Math.round(brng)}° ${dirs[dirIdx]}`;
+        }
+
+        let userLat = null, userLon = null;
+        let currentBeaconLat = 0, currentBeaconLon = 0;
+
+        if ("geolocation" in navigator) {
+            navigator.geolocation.watchPosition(
+                (pos) => {
+                    userLat = pos.coords.latitude;
+                    userLon = pos.coords.longitude;
+                    updateRelativeLocation();
+                },
+                (err) => {},
+                { enableHighAccuracy: true }
+            );
+        }
+
+        function updateRelativeLocation() {
+            if (userLat !== null && userLon !== null && currentBeaconLat !== 0 && currentBeaconLon !== 0) {
+                const distM = calculateDistanceMeters(userLat, userLon, currentBeaconLat, currentBeaconLon);
+                const headingStr = calculateBearing(userLat, userLon, currentBeaconLat, currentBeaconLon);
+                
+                const distEl = document.getElementById('txtDistance');
+                if (distEl && distM !== null) {
+                    distEl.innerText = distM >= 1000 ? (distM / 1000).toFixed(2) + " km" : Math.round(distM) + " m";
+                }
+                
+                const headEl = document.getElementById('txtHeading');
+                if (headEl && headingStr !== null) {
+                    headEl.innerText = headingStr;
+                }
+            }
         }
 
         async function sendCmd(cmdName, params = {}) {
