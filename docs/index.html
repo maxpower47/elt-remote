@@ -267,7 +267,7 @@
 <body>
     <header>
         <div class="header-title">
-            <h1>📡 Beacon Center <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.0.9</span></h1>
+            <h1>📡 Beacon Center <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.1.0</span></h1>
             <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
         </div>
         <div>
@@ -456,7 +456,7 @@
                 }
 
                 if (!service) {
-                    throw new Error(`No NUS service match. Discovered UUIDs: ${services.map(s => s.uuid).join(", ")}`);
+                    throw new Error(`No NUS service match (Found ${services.length} services). If on Android, please Forget/Unpair Heltec in Android Bluetooth Settings & toggle Bluetooth OFF/ON to clear Android GATT cache.`);
                 }
 
                 logConsole(`Bound to Service: ${service.uuid}`);

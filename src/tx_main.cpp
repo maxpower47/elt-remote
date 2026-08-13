@@ -2,10 +2,7 @@
 #include <SPI.h>
 #include <RadioLib.h>
 #include <ArduinoJson.h>
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <BLEUtils.h>
-#include <BLE2902.h>
+#include <NimBLEDevice.h>
 #include <Wire.h>
 #include <SSD1306Wire.h>
 
@@ -647,33 +644,21 @@ void setup() {
 
     pTxCharacteristic = pService->createCharacteristic(
                             CHARACTERISTIC_UUID_TX,
-                            BLECharacteristic::PROPERTY_NOTIFY
+                            NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY
                         );
-    pTxCharacteristic->addDescriptor(new BLE2902());
 
     BLECharacteristic *pRxCharacteristic = pService->createCharacteristic(
                                            CHARACTERISTIC_UUID_RX,
-                                           BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR
+                                           NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR
                                        );
     pRxCharacteristic->setCallbacks(new MyCallbacks());
 
     pService->start();
 
     BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-    
-    BLEAdvertisementData oAdvertisementData = BLEAdvertisementData();
-    oAdvertisementData.setFlags(0x06); // GENERAL_DISC_MODE | BREDR_NOT_SPT
-    oAdvertisementData.setCompleteServices(BLEUUID(SERVICE_UUID));
-    oAdvertisementData.setName("Heltec_V3");
-    
-    BLEAdvertisementData oScanResponseData = BLEAdvertisementData();
-    oScanResponseData.setCompleteServices(BLEUUID(SERVICE_UUID));
-    
-    pAdvertising->setAdvertisementData(oAdvertisementData);
-    pAdvertising->setScanResponseData(oScanResponseData);
-    pAdvertising->setMinPreferred(0x06);
-    pAdvertising->setMinPreferred(0x12);
-    BLEDevice::startAdvertising();
+    pAdvertising->addServiceUUID(SERVICE_UUID);
+    pAdvertising->setScanResponse(true);
+    pAdvertising->start();
 
     int state = radio.begin(915.0, 125.0, 7, 5, 0x34, 22, 8, 1.6, false);
     if (state == RADIOLIB_ERR_NONE) {
