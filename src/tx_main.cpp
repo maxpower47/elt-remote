@@ -639,20 +639,20 @@ void setup() {
     display.setFont(ArialMT_Plain_10);
     updateOLED();
 
-    BLEDevice::init("Heltec_V3_Transmitter");
+    BLEDevice::init("Heltec_V3_Remote");
     pServer = BLEDevice::createServer();
     pServer->setCallbacks(new MyServerCallbacks());
 
-    BLEService *pService = pServer->createService(SERVICE_UUID);
+    BLEService *pService = pServer->createService(BLEUUID(SERVICE_UUID));
 
     pTxCharacteristic = pService->createCharacteristic(
-                            CHARACTERISTIC_UUID_TX,
+                            BLEUUID(CHARACTERISTIC_UUID_TX),
                             BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
                         );
     pTxCharacteristic->addDescriptor(new BLE2902());
 
     BLECharacteristic *pRxCharacteristic = pService->createCharacteristic(
-                                           CHARACTERISTIC_UUID_RX,
+                                           BLEUUID(CHARACTERISTIC_UUID_RX),
                                            BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR
                                        );
     pRxCharacteristic->setCallbacks(new MyCallbacks());
