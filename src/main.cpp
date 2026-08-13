@@ -221,6 +221,9 @@ void updateTimerState() {
     updateHardwareOutputs();
 }
 
+extern volatile bool rxFlag;
+String generateTelemetry();
+
 void parseCommand(const String& cmdStr) {
     StaticJsonDocument<256> doc;
     DeserializationError err = deserializeJson(doc, cmdStr);
@@ -277,6 +280,18 @@ String generateTelemetry() {
     String out; serializeJson(doc, out); return out;
 }
 
+void broadcastBleTelemetry() {
+    if (Bluefruit.connected()) {
+        String payload = generateTelemetry() + "\n";
+        bleuart.write((const uint8_t*)payload.c_str(), payload.length());
+    }
+}
+
+void connect_callback(uint16_t conn_handle) {
+    (void) conn_handle;
+    broadcastBleTelemetry();
+}
+
 void bleRxCallback(uint16_t conn_hdl) {
     (void) conn_hdl;
     String input = "";
@@ -288,6 +303,7 @@ void bleRxCallback(uint16_t conn_hdl) {
     if (input.startsWith("{")) {
         Serial.println("[BLE RAK4631 RX] Direct Command: " + input);
         parseCommand(input);
+        broadcastBleTelemetry();
     }
 }
 
@@ -317,6 +333,7 @@ void setup() {
     Bluefruit.begin();
     Bluefruit.setTxPower(4);
     Bluefruit.setName("RAK4631_Beacon");
+    Bluefruit.Periph.setConnectCallback(connect_callback);
 
     bleuart.begin();
     bleuart.setRxCallback(bleRxCallback);
@@ -371,7 +388,7 @@ void loop() {
         ledSet(HW_LED_GREEN, false);
 
         if (Bluefruit.connected() && bleuart.notifyEnabled()) {
-            bleuart.print(payload);
+            bleuart.write((const uint8_t*)payload.c_str(), payload.length());
         }
 
         if (txState == RADIOLIB_ERR_NONE)  Serial.println("[TX] " + payload);

@@ -91,9 +91,12 @@ float readTxBatteryVoltage() {
     return vbat;
 }
 
+void broadcastBleTelemetry();
+
 class MyServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
         deviceConnected = true;
+        broadcastBleTelemetry();
     };
 
     void onDisconnect(BLEServer* pServer) {
@@ -209,6 +212,31 @@ void addRssiSample(int rssi) {
     rssiHistoryIdx = (rssiHistoryIdx + 1) % RSSI_HISTORY_SIZE;
 }
 
+void broadcastBleTelemetry() {
+    if (deviceConnected && pTxCharacteristic) {
+        StaticJsonDocument<384> bleDoc;
+        bleDoc["type"] = "TELEMETRY";
+        bleDoc["device"] = "HELTEC_V3_TX";
+        bleDoc["state"] = beaconState;
+        bleDoc["batt"] = beaconBatt;
+        bleDoc["tx_batt"] = txBatt;
+        bleDoc["remaining_sec"] = remainingSec;
+        bleDoc["rssi"] = (int)lastRssi;
+        bleDoc["snr"] = (int)lastSnr;
+        bleDoc["pkts"] = packetCount;
+        JsonObject bleGps = bleDoc.createNestedObject("gps");
+        bleGps["lat"] = beaconLat;
+        bleGps["lon"] = beaconLon;
+        bleGps["valid"] = gpsValid;
+
+        String bleJson;
+        serializeJson(bleDoc, bleJson);
+        bleJson += "\n";
+        pTxCharacteristic->setValue((const uint8_t*)bleJson.c_str(), bleJson.length());
+        pTxCharacteristic->notify();
+    }
+}
+
 void parseTelemetry(const String& jsonStr) {
     StaticJsonDocument<512> doc;
     DeserializationError err = deserializeJson(doc, jsonStr);
@@ -232,27 +260,7 @@ void parseTelemetry(const String& jsonStr) {
     addRssiSample((int)lastRssi);
     txBatt = readTxBatteryVoltage();
 
-    if (deviceConnected && pTxCharacteristic) {
-        StaticJsonDocument<384> bleDoc;
-        bleDoc["type"] = "TELEMETRY";
-        bleDoc["device"] = "HELTEC_V3_TX";
-        bleDoc["state"] = beaconState;
-        bleDoc["batt"] = beaconBatt;
-        bleDoc["tx_batt"] = txBatt;
-        bleDoc["remaining_sec"] = remainingSec;
-        bleDoc["rssi"] = (int)lastRssi;
-        bleDoc["snr"] = (int)lastSnr;
-        bleDoc["pkts"] = packetCount;
-        JsonObject bleGps = bleDoc.createNestedObject("gps");
-        bleGps["lat"] = beaconLat;
-        bleGps["lon"] = beaconLon;
-        bleGps["valid"] = gpsValid;
-
-        String bleJson;
-        serializeJson(bleDoc, bleJson);
-        pTxCharacteristic->setValue(bleJson.c_str());
-        pTxCharacteristic->notify();
-    }
+    broadcastBleTelemetry();
 }
 
 // Custom 10x10 Pixel Art Tab Icons
@@ -603,6 +611,7 @@ void renderToastOverlay() {
     }
 }
 
+void broadcastBleTelemetry();
 void updateOLED() {
     display.clear();
     switch (currentScreen) {
