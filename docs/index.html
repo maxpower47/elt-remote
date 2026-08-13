@@ -267,7 +267,7 @@
 <body>
     <header>
         <div class="header-title">
-            <h1>📡 Beacon Center <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.1.3</span></h1>
+            <h1>📡 Beacon Center <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.1.4</span></h1>
             <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
         </div>
         <div>
@@ -513,32 +513,37 @@
         function handleBleNotification(event) {
             const value = event.target.value;
             const decoder = new TextDecoder('utf-8');
-            bleRxBuffer += decoder.decode(value);
+            const chunk = decoder.decode(value);
+            bleRxBuffer += chunk;
 
-            if (bleRxBuffer.includes('\n')) {
-                const lines = bleRxBuffer.split('\n');
-                // Keep incomplete last segment in buffer
-                bleRxBuffer = lines.pop();
+            // Extract complete JSON objects from buffer
+            let firstOpen = bleRxBuffer.indexOf('{');
+            let lastClose = bleRxBuffer.lastIndexOf('}');
 
-                for (let line of lines) {
-                    line = line.trim();
-                    if (line.length === 0) continue;
-                    try {
-                        const data = JSON.parse(line);
-                        updateDashboard(data);
-                    } catch (e) {
-                        logConsole("BLE RX Raw: " + line);
-                    }
-                }
-            } else if (bleRxBuffer.trim().startsWith('{') && bleRxBuffer.trim().endsWith('}')) {
-                const jsonStr = bleRxBuffer.trim();
-                bleRxBuffer = "";
+            if (firstOpen !== -1 && lastClose > firstOpen) {
+                const jsonCandidate = bleRxBuffer.substring(firstOpen, lastClose + 1);
                 try {
-                    const data = JSON.parse(jsonStr);
+                    const data = JSON.parse(jsonCandidate);
+                    bleRxBuffer = bleRxBuffer.substring(lastClose + 1);
                     updateDashboard(data);
                 } catch (e) {
-                    logConsole("BLE RX Raw: " + jsonStr);
+                    // Search for smaller JSON segments if nested/concatenated
+                    const matches = bleRxBuffer.match(/\{[^{}]*\}/g);
+                    if (matches) {
+                        for (let match of matches) {
+                            try {
+                                const data = JSON.parse(match);
+                                updateDashboard(data);
+                                bleRxBuffer = "";
+                                break;
+                            } catch (err) {}
+                        }
+                    }
                 }
+            }
+
+            if (bleRxBuffer.length > 1024) {
+                bleRxBuffer = ""; // Clear buffer safety limit
             }
         }
 
