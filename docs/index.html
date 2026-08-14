@@ -269,7 +269,7 @@
     <header>
         <div class="header-title">
             <h1>📡 Beacon Center</h1>
-            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.3.5</span>
+            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.3.6</span>
             <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
         </div>
         <button id="btnConnectBle" class="btn btn-connect" onclick="toggleWebBluetooth()">📲 Connect BLE</button>
@@ -333,8 +333,11 @@
                 <div style="font-size: 0.85rem; font-family: monospace; line-height: 1.6;">
                     <div><b>Lat:</b> <span id="txtDmsLat" style="color: var(--accent-blue);">--°--'--"N</span></div>
                     <div><b>Lon:</b> <span id="txtDmsLon" style="color: var(--accent-blue);">--°--'--"W</span></div>
-                    <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px;">Dec: <span id="txtLat">0.00000</span>, <span id="txtLon">0.00000</span></div>
-                    <div style="border-top: 1px solid var(--border-color); padding-top: 4px; display: flex; justify-content: space-between;">
+                    <div style="display: flex; justify-content: space-between; border-top: 1px solid var(--border-color); padding-top: 2px; margin-top: 2px;">
+                        <div><b>CAP Grid:</b> <span id="txtCapGrid" style="color: var(--accent-orange); font-weight: bold;">--</span></div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">Dec: <span id="txtLat">0.00000</span>, <span id="txtLon">0.00000</span></div>
+                    </div>
+                    <div style="border-top: 1px solid var(--border-color); padding-top: 4px; margin-top: 2px; display: flex; justify-content: space-between;">
                         <div>Dist: <b id="txtDistance" style="color: var(--accent-green);">--</b></div>
                         <div>Heading: <b id="txtHeading" style="color: var(--accent-orange);">--</b></div>
                     </div>
@@ -575,6 +578,41 @@
             return Math.round(((v - 3.3) / 0.3) * 15);
         }
 
+        // Convert Latitude & Longitude to 3-Level CAP Cell Grid Identifier (e.g. 4086ABC)
+        function getCapCellGrid(lat, lon) {
+            if (!lat && !lon) return "--";
+            const aLat = Math.abs(lat);
+            const aLon = Math.abs(lon);
+            if (aLat === 0 && aLon === 0) return "--";
+
+            // Whole degree base (Lower Right / Southeast corner numbers)
+            const baseLat = Math.floor(aLat);
+            const baseLon = Math.floor(aLon);
+
+            const latStr = baseLat.toString().padStart(2, '0');
+            const lonStr = baseLon >= 100 ? baseLon.toString() : baseLon.toString().padStart(2, '0');
+            const base = `${latStr}${lonStr}`;
+
+            // Minutes offset within the 1° degree box (0.0 to 60.0)
+            const latMin = (aLat - baseLat) * 60.0;
+            const lonMin = (aLon - baseLon) * 60.0;
+
+            function getQuad(lMin, loMin, span) {
+                const isNorth = (lMin % span) >= (span / 2.0);
+                const isWest = (loMin % span) >= (span / 2.0);
+                if (isNorth && isWest) return 'A';  // NW
+                if (isNorth && !isWest) return 'B'; // NE
+                if (!isNorth && isWest) return 'C'; // SW
+                return 'D';                         // SE
+            }
+
+            const q1 = getQuad(latMin, lonMin, 60.0); // Level 1: 30-minute quadrant
+            const q2 = getQuad(latMin, lonMin, 30.0); // Level 2: 15-minute quadrant
+            const q3 = getQuad(latMin, lonMin, 15.0); // Level 3: 7.5-minute quadrant
+
+            return `${base}${q1}${q2}${q3}`;
+        }
+
         function updateDashboard(data) {
             if (!data || typeof data !== 'object') return;
             lastRxTimestamp = Date.now();
@@ -637,6 +675,9 @@
 
                 const txtDmsLon = document.getElementById('txtDmsLon');
                 if (txtDmsLon) txtDmsLon.innerText = decimalToDMS(lonVal, false);
+
+                const txtCapGrid = document.getElementById('txtCapGrid');
+                if (txtCapGrid) txtCapGrid.innerText = getCapCellGrid(latVal, lonVal);
 
                 currentBeaconLat = latVal;
                 currentBeaconLon = lonVal;

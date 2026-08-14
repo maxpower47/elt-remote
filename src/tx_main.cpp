@@ -480,35 +480,60 @@ const char* getCardinalDirection(float brng) {
     return dirs[idx % 8];
 }
 
+// Convert Latitude & Longitude to 3-Level CAP Cell Grid Identifier (e.g. 4086ABC)
+String getCapCellGrid(float lat, float lon) {
+    if (lat == 0.0F && lon == 0.0F) return "--";
+    float aLat = abs(lat);
+    float aLon = abs(lon);
+
+    int baseLat = (int)aLat;
+    int baseLon = (int)aLon;
+
+    char base[16];
+    if (baseLon >= 100) {
+        snprintf(base, sizeof(base), "%02d%d", baseLat, baseLon);
+    } else {
+        snprintf(base, sizeof(base), "%02d%02d", baseLat, baseLon);
+    }
+
+    float latMin = (aLat - (float)baseLat) * 60.0F;
+    float lonMin = (aLon - (float)baseLon) * 60.0F;
+
+    auto getQuad = [](float lMin, float loMin, float span) -> char {
+        bool isNorth = fmod(lMin, span) >= (span / 2.0F);
+        bool isWest = fmod(loMin, span) >= (span / 2.0F);
+        if (isNorth && isWest) return 'A';  // NW
+        if (isNorth && !isWest) return 'B'; // NE
+        if (!isNorth && isWest) return 'C'; // SW
+        return 'D';                         // SE
+    };
+
+    char q1 = getQuad(latMin, lonMin, 60.0F);
+    char q2 = getQuad(latMin, lonMin, 30.0F);
+    char q3 = getQuad(latMin, lonMin, 15.0F);
+
+    char result[32];
+    snprintf(result, sizeof(result), "%s%c%c%c", base, q1, q2, q3);
+    return String(result);
+}
+
 void renderScreen1() {
     drawHeader("2. GPS TELEMETRY");
 
     uint32_t ageSec = (lastRxTime > 0) ? (millis() - lastRxTime) / 1000 : 0;
-    bool isLost = (lastRxTime > 0 && ageSec >= 30);
+    bool isLost = (lastRxTime > 0 && ageSec >= 35);
 
     display.setFont(ArialMT_Plain_10);
-    if (isLost) {
-        display.drawString(0, 15, "Fix Status: STALE (LOST LINK)");
-    } else {
-        display.drawString(0, 15, "Fix: " + String(gpsValid ? "VALID FIX 3D" : "NO FIX / SEARCH"));
-    }
-
     if (lastRxTime > 0 && gpsValid) {
+        display.drawString(0, 15, "CAP: " + getCapCellGrid(beaconLat, beaconLon));
         display.drawString(0, 27, "Lat: " + decimalToDMS(beaconLat, true));
         display.drawString(0, 39, "Lon: " + decimalToDMS(beaconLon, false));
-        
-        // Calculate Distance & Bearing (assuming base origin or current beacon pos)
-        float distM = calculateDistanceMeters(34.0522F, -118.2437F, beaconLat, beaconLon);
-        float brng = calculateBearing(34.0522F, -118.2437F, beaconLat, beaconLon);
-
-        String distStr = (distM >= 1000.0F) ? (String(distM / 1000.0F, 2) + " km") : (String((int)distM) + " m");
-        String brngStr = String((int)brng) + "° " + String(getCardinalDirection(brng));
-
-        display.drawString(0, 51, "Dist: " + distStr + "  Hdg: " + brngStr);
+        display.drawString(0, 51, "Fix: 3D VALID  |  Rx: " + String(ageSec) + "s");
     } else {
+        display.drawString(0, 15, "CAP: --");
         display.drawString(0, 27, "Lat: 0°00'00.0\"N");
         display.drawString(0, 39, "Lon: 0°00'00.0\"W");
-        display.drawString(0, 51, "Dist: --          Hdg: --");
+        display.drawString(0, 51, isLost ? "LINK LOST (STALE)" : "Fix: NO GPS FIX");
     }
 }
 
