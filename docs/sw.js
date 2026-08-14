@@ -1,8 +1,12 @@
-const CACHE_NAME = 'lora-beacon-pwa-v1.3.6';
+const CACHE_NAME = 'lora-beacon-pwa-v1.3.7';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
   './manifest.json',
+  './favicon.png',
+  './apple-touch-icon.png',
+  './icon-192.png',
+  './icon-512.png',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
 ];
