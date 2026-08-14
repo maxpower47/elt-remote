@@ -25,7 +25,7 @@ using namespace Adafruit_LittleFS_Namespace;
 #define HW_MOSFET_TRIG_PIN  20         // P0.20 — RAK19003 J7 Header "TX" Pad (3.3V Logic)
 
 #undef PIN_VBAT
-#define PIN_VBAT            31         // P0.31 / AIN7
+#define PIN_VBAT            A2         // D16 / P0.30 / AIN6 on RAK19003 Mini Baseboard
 
 #define STATE_FILE_PATH     "/beacon_state.bin"
 
@@ -194,15 +194,22 @@ void loadStateFromNVM() {
 }
 
 float readBatteryVoltage() {
+    analogReference(AR_INTERNAL_3_0);
     analogReadResolution(12);
+
+    // Discard first sample to settle SAADC
+    analogRead(PIN_VBAT);
+    delayMicroseconds(50);
+
     uint32_t rawSum = 0;
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < 4; i++) {
         rawSum += analogRead(PIN_VBAT);
-        delay(1);
+        delayMicroseconds(50);
     }
-    float rawAvg = (float)rawSum / 8.0F;
-    float vbat = (rawAvg * 3.6F / 4095.0F) * 1.73F;
-    if (vbat < 1.5F) return 0.0F;
+    float rawAvg = (float)rawSum / 4.0F;
+    // 3.0V reference / 4096 * 1.73 divider compensation
+    float vbat = (rawAvg * 3.0F / 4096.0F) * 1.73F;
+    if (vbat < 2.0F) return 0.0F; // Below 2.0V = USB power / no battery
     return vbat;
 }
 
@@ -372,7 +379,10 @@ void setup() {
     Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
     Bluefruit.Advertising.addTxPower();
     Bluefruit.Advertising.addService(bleuart);
-    Bluefruit.Advertising.addName();
+
+    // Put name in Scan Response to prevent 31-byte primary payload truncation
+    Bluefruit.ScanResponse.addName();
+
     Bluefruit.Advertising.restartOnDisconnect(true);
     Bluefruit.Advertising.setInterval(32, 244);
     Bluefruit.Advertising.setFastTimeout(30);
