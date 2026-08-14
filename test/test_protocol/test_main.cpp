@@ -3,6 +3,7 @@
 #include <cmath>
 #include <string>
 #include <cstring>
+#include "../../src/protocol_binary.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -135,11 +136,53 @@ void test_json_telemetry_schema() {
     TEST_ASSERT_FALSE(parsed["usb"].as<bool>());
 }
 
+void test_binary_protocol_structures() {
+    LoRaTelemetryPacket tel;
+    memset(&tel, 0, sizeof(tel));
+    tel.msg_type = MSG_TYPE_TELEMETRY;
+    tel.seq_num = 42;
+    tel.state = STATE_ID_ARMED_TIMER;
+    tel.flags = FLAG_USB_POWER | FLAG_GPS_VALID;
+    tel.batt_mv = 4150;
+    tel.remaining_sec = 3600;
+    tel.lat_e7 = (int32_t)(34.0522 * 1e7);
+    tel.lon_e7 = (int32_t)(-118.2437 * 1e7);
+
+    // Verify exact binary size is 18 bytes
+    TEST_ASSERT_EQUAL_UINT32(18, sizeof(LoRaTelemetryPacket));
+
+    // Simulate binary wire transfer & decode
+    uint8_t wireBuffer[32];
+    memcpy(wireBuffer, &tel, sizeof(LoRaTelemetryPacket));
+
+    LoRaTelemetryPacket *decoded = (LoRaTelemetryPacket*)wireBuffer;
+    TEST_ASSERT_EQUAL_UINT8(MSG_TYPE_TELEMETRY, decoded->msg_type);
+    TEST_ASSERT_EQUAL_UINT8(42, decoded->seq_num);
+    TEST_ASSERT_EQUAL_UINT8(STATE_ID_ARMED_TIMER, decoded->state);
+    TEST_ASSERT_EQUAL_UINT8(FLAG_USB_POWER | FLAG_GPS_VALID, decoded->flags);
+    TEST_ASSERT_EQUAL_UINT16(4150, decoded->batt_mv);
+    TEST_ASSERT_EQUAL_UINT32(3600, decoded->remaining_sec);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001F, 34.0522F, (float)decoded->lat_e7 / 1e7);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001F, -118.2437F, (float)decoded->lon_e7 / 1e7);
+
+    // Command packet size check
+    TEST_ASSERT_EQUAL_UINT32(8, sizeof(LoRaCommandPacket));
+    LoRaCommandPacket cmd;
+    cmd.msg_type = MSG_TYPE_COMMAND;
+    cmd.seq_num = 1;
+    cmd.cmd = CMD_ARM_NOW;
+    cmd.reserved = 0;
+    cmd.param = 0;
+    TEST_ASSERT_EQUAL_UINT8(MSG_TYPE_COMMAND, cmd.msg_type);
+    TEST_ASSERT_EQUAL_UINT8(CMD_ARM_NOW, cmd.cmd);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_battery_voltage_to_percent);
     RUN_TEST(test_cap_cell_grid_calculation);
     RUN_TEST(test_distance_haversine);
     RUN_TEST(test_json_telemetry_schema);
+    RUN_TEST(test_binary_protocol_structures);
     return UNITY_END();
 }

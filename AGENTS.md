@@ -37,31 +37,41 @@
 - **Output Power**: `+22 dBm`
 - **Preamble Length**: `8 symbols`
 - **Beacon Telemetry Interval**: Every `10,000 ms` (10 seconds)
-- **Command Turnaround Delay**: `250 ms`
-- **Command Retry Engine (Heltec V3)**: Asynchronous non-blocking retries every `1200 ms` (up to 3 retries).
+- **Command Turnaround Delay**: `50 ms`
+- **Command Retry Engine (Heltec V3)**: Asynchronous non-blocking retries every `350 ms` (up to 3 retries).
 
-### Nordic UART Service (NUS) UUIDs:
+### Binary Over-the-Air Protocol (`src/protocol_binary.h`):
+- **Telemetry Packet (`0x01`)** — **18 Bytes Total** (~90 ms on SF10 vs 540 ms JSON):
+  ```c
+  typedef struct {
+      uint8_t  msg_type;      // 0x01 (MSG_TYPE_TELEMETRY)
+      uint8_t  seq_num;       // Rolling sequence number
+      uint8_t  state;         // 0=DISARMED, 1=ARMED_TIMER, 2=ACTIVE
+      uint8_t  flags;         // Bit 0: USB Power, Bit 1: GPS Fix Valid
+      uint16_t batt_mv;       // Battery millivolts (e.g. 4120 = 4.12V)
+      uint32_t remaining_sec; // Countdown seconds for ARMED_TIMER
+      int32_t  lat_e7;        // Latitude * 1e7
+      int32_t  lon_e7;        // Longitude * 1e7
+  } LoRaTelemetryPacket;
+  ```
+- **Control Command Packet (`0x02`)** — **8 Bytes Total**:
+  ```c
+  typedef struct {
+      uint8_t  msg_type;      // 0x02 (MSG_TYPE_COMMAND)
+      uint8_t  seq_num;       // Rolling sequence number
+      uint8_t  cmd;           // 0x01=DISARM, 0x02=ARM_NOW, 0x03=ARM_TIMER
+      uint8_t  reserved;      // 0x00 padding
+      uint32_t param;         // Countdown seconds (if CMD_ARM_TIMER)
+  } LoRaCommandPacket;
+  ```
+
+### Nordic UART Service (NUS) UUIDs (Web Bluetooth PWA):
 - **Service UUID**: `6e400001-b5a3-f393-e0a9-e50e24dcca9e`
 - **RX Characteristic** (Write): `6e400002-b5a3-f393-e0a9-e50e24dcca9e`
 - **TX Characteristic** (Notify): `6e400003-b5a3-f393-e0a9-e50e24dcca9e`
 
-### JSON Protocol:
-- **Telemetry Payload**:
-  ```json
-  {
-    "type": "TELEMETRY",
-    "device": "RAK4631_BEACON",
-    "state": "DISARMED",
-    "batt": 4.12,
-    "usb": false,
-    "remaining_sec": 0,
-    "gps": { "lat": 34.0522, "lon": -118.2437, "valid": true }
-  }
-  ```
-- **Control Commands**:
-  - `{"cmd":"ARM_NOW"}` $\rightarrow$ Transition to `ACTIVE` (MOSFET ON).
-  - `{"cmd":"DISARM"}` $\rightarrow$ Transition to `DISARMED` (MOSFET OFF).
-  - `{"cmd":"ARM_TIMER","sec":3600}` $\rightarrow$ Transition to `ARMED_TIMER` with countdown in seconds.
+### Web Bluetooth JSON Protocol:
+- Full JSON schema retained over BLE UART for the Web Dashboard.
 
 ---
 

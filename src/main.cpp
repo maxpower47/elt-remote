@@ -5,6 +5,7 @@
 #include <bluefruit.h>
 #include <Adafruit_LittleFS.h>
 #include <InternalFileSystem.h>
+#include "protocol_binary.h"
 #include <hal/nrf_gpio.h>
 #include <nrfx_gpiote.h>
 #include <nrf.h>
@@ -231,51 +232,90 @@ void updateTimerState() {
 void onDio1();
 void broadcastBleTelemetry();
 extern volatile bool rxFlag;
-String generateTelemetry();
+void executeCommand(uint8_t cmdId, uint32_t param);
 
-void parseCommand(const String& cmdStr) {
-    StaticJsonDocument<512> doc;
-    DeserializationError err = deserializeJson(doc, cmdStr);
+void parseCommand(String jsonStr) {
+    StaticJsonDocument<256> doc;
+    DeserializationError err = deserializeJson(doc, jsonStr);
     if (err) return;
 
     if (doc.containsKey("cmd")) {
         String cmd = doc["cmd"].as<String>();
         if (cmd == "DISARM") {
-            currentState = DISARMED;
-            remainingSeconds = 0;
-            updateHardwareOutputs();
-            saveStateToNVM();
-            Serial.println("[RAK4631] Command Received: DISARM (MOSFET OFF)");
+            executeCommand(CMD_DISARM, 0);
         } else if (cmd == "ARM_NOW") {
-            currentState = ACTIVE;
-            remainingSeconds = 0;
-            updateHardwareOutputs();
-            saveStateToNVM();
-            Serial.println("[RAK4631] Command Received: ARM_NOW (MOSFET ON)");
+            executeCommand(CMD_ARM_NOW, 0);
         } else if (cmd == "ARM_TIMER") {
-            currentState = ARMED_TIMER;
-            armTimerDurationSec = doc["sec"] | 3600;
-            armTimerStartMs = millis();
-            remainingSeconds = armTimerDurationSec;
-            updateHardwareOutputs();
-            saveStateToNVM();
-            Serial.printf("[RAK4631] Command Received: ARM_TIMER (%ds)\n", armTimerDurationSec);
+            uint32_t sec = doc["sec"] | 3600;
+            executeCommand(CMD_ARM_TIMER, sec);
         }
-
-        // Transmit immediate BLE telemetry update with 0ms delay if BLE connected
-        if (Bluefruit.connected()) {
-            broadcastBleTelemetry();
-        }
-
-        // Transmit over LoRa for distant Heltec units
-        delay(250);
-        String payload = generateTelemetry();
-        radio.clearDio1Action();
-        radio.transmit(payload);
-        rxFlag = false;
-        radio.setDio1Action(onDio1);
-        radio.startReceive();
     }
+}
+
+uint8_t txSequenceNumber = 0;
+
+void generateBinaryTelemetry(LoRaTelemetryPacket &pkt) {
+    updateTimerState();
+    batteryVoltage = readBatteryVoltage();
+    bool usbPower = (NRF_POWER->USBREGSTATUS & POWER_USBREGSTATUS_VBUSDETECT_Msk) != 0;
+
+    memset(&pkt, 0, sizeof(LoRaTelemetryPacket));
+    pkt.msg_type = MSG_TYPE_TELEMETRY;
+    pkt.seq_num = ++txSequenceNumber;
+    
+    switch (currentState) {
+        case DISARMED:    pkt.state = STATE_ID_DISARMED; break;
+        case ARMED_TIMER: pkt.state = STATE_ID_ARMED_TIMER; break;
+        case ACTIVE:      pkt.state = STATE_ID_ACTIVE; break;
+    }
+
+    pkt.flags = 0;
+    if (usbPower) pkt.flags |= FLAG_USB_POWER;
+    if (gpsFixValid) pkt.flags |= FLAG_GPS_VALID;
+
+    pkt.batt_mv = (uint16_t)(batteryVoltage * 1000.0F);
+    pkt.remaining_sec = remainingSeconds;
+    pkt.lat_e7 = (int32_t)(lastLat * 1e7);
+    pkt.lon_e7 = (int32_t)(lastLon * 1e7);
+}
+
+void executeCommand(uint8_t cmdId, uint32_t param) {
+    if (cmdId == CMD_DISARM) {
+        currentState = DISARMED;
+        remainingSeconds = 0;
+        updateHardwareOutputs();
+        saveStateToNVM();
+        Serial.println("[RAK4631] Command Received: DISARM (MOSFET OFF)");
+    } else if (cmdId == CMD_ARM_NOW) {
+        currentState = ACTIVE;
+        remainingSeconds = 0;
+        updateHardwareOutputs();
+        saveStateToNVM();
+        Serial.println("[RAK4631] Command Received: ARM_NOW (MOSFET ON)");
+    } else if (cmdId == CMD_ARM_TIMER) {
+        currentState = ARMED_TIMER;
+        armTimerDurationSec = param > 0 ? param : 3600;
+        armTimerStartMs = millis();
+        remainingSeconds = armTimerDurationSec;
+        updateHardwareOutputs();
+        saveStateToNVM();
+        Serial.printf("[RAK4631] Command Received: ARM_TIMER (%ds)\n", armTimerDurationSec);
+    }
+
+    // Transmit immediate BLE telemetry update with 0ms delay if BLE connected
+    if (Bluefruit.connected()) {
+        broadcastBleTelemetry();
+    }
+
+    // Transmit immediate binary reply over LoRa for distant Heltec units
+    delay(50);
+    LoRaTelemetryPacket pkt;
+    generateBinaryTelemetry(pkt);
+    radio.clearDio1Action();
+    radio.transmit((uint8_t*)&pkt, sizeof(pkt));
+    rxFlag = false;
+    radio.setDio1Action(onDio1);
+    radio.startReceive();
 }
 
 String generateTelemetry() {
@@ -413,12 +453,25 @@ void setup() {
 void loop() {
     if (rxFlag) {
         rxFlag = false;
-        String str;
-        int state = radio.readData(str);
+        uint8_t rxBuffer[64];
+        int len = radio.getPacketLength();
+        int state = radio.readData(rxBuffer, len > (int)sizeof(rxBuffer) ? sizeof(rxBuffer) : len);
         radio.startReceive();
-        if (state == RADIOLIB_ERR_NONE && str.length() > 0) {
-            Serial.println("[RX] " + str);
-            parseCommand(str);
+
+        if (state == RADIOLIB_ERR_NONE && len > 0) {
+            // Check if binary command packet
+            if (len >= (int)sizeof(LoRaCommandPacket) && rxBuffer[0] == MSG_TYPE_COMMAND) {
+                LoRaCommandPacket *cmdPkt = (LoRaCommandPacket*)rxBuffer;
+                Serial.printf("[RX Binary Cmd] Type: 0x%02X, Cmd: 0x%02X, Param: %u\n", cmdPkt->msg_type, cmdPkt->cmd, cmdPkt->param);
+                executeCommand(cmdPkt->cmd, cmdPkt->param);
+            }
+            // Fallback for legacy JSON string
+            else if (rxBuffer[0] == '{') {
+                String str = "";
+                for (int i = 0; i < len; i++) str += (char)rxBuffer[i];
+                Serial.println("[RX JSON Cmd] " + str);
+                parseCommand(str);
+            }
         }
     }
 
@@ -426,21 +479,27 @@ void loop() {
     if (millis() - lastTx > 10000) {
         lastTx = millis();
         ledSet(HW_LED_GREEN, true);
-        String payload = generateTelemetry();
+
+        // Transmit compact 20-byte binary telemetry over LoRa
+        LoRaTelemetryPacket pkt;
+        generateBinaryTelemetry(pkt);
         radio.clearDio1Action();
-        int txState = radio.transmit(payload);
+        int txState = radio.transmit((uint8_t*)&pkt, sizeof(pkt));
         rxFlag = false;
         radio.setDio1Action(onDio1);
         radio.startReceive();
-        delay(80);
+        delay(40);
         ledSet(HW_LED_GREEN, false);
 
         if (Bluefruit.connected()) {
             broadcastBleTelemetry();
         }
 
-        if (txState == RADIOLIB_ERR_NONE)  Serial.println("[TX] " + payload);
-        else Serial.printf("[TX FAIL] %d\n", txState);
+        if (txState == RADIOLIB_ERR_NONE) {
+            Serial.printf("[TX Binary Telemetry] 20 Bytes Sent | Seq: %u, State: %u, Batt: %u mV\n", pkt.seq_num, pkt.state, pkt.batt_mv);
+        } else {
+            Serial.printf("[TX FAIL] %d\n", txState);
+        }
     }
 
     waitForEvent();

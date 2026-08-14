@@ -5,6 +5,7 @@
 #include <NimBLEDevice.h>
 #include <Wire.h>
 #include <SSD1306Wire.h>
+#include "protocol_binary.h"
 
 #define PIN_BUTTON   0
 #define PIN_VEXT     36
@@ -106,10 +107,31 @@ class MyServerCallbacks: public BLEServerCallbacks {
     }
 };
 
+uint8_t heltecTxSeq = 0;
+
 void transmitLoRaCommand(String cmd) {
+    LoRaCommandPacket pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.msg_type = MSG_TYPE_COMMAND;
+    pkt.seq_num = ++heltecTxSeq;
+
+    if (cmd == "DISARM" || cmd.indexOf("DISARM") >= 0) {
+        pkt.cmd = CMD_DISARM;
+    } else if (cmd == "ARM_NOW" || cmd.indexOf("ARM_NOW") >= 0) {
+        pkt.cmd = CMD_ARM_NOW;
+    } else if (cmd.indexOf("ARM_TIMER") >= 0) {
+        pkt.cmd = CMD_ARM_TIMER;
+        StaticJsonDocument<128> doc;
+        if (deserializeJson(doc, cmd) == DeserializationError::Ok && doc.containsKey("sec")) {
+            pkt.param = doc["sec"].as<uint32_t>();
+        } else {
+            pkt.param = selectedHours * 3600;
+        }
+    }
+
     radio.clearDio1Action();
-    int txRes = radio.transmit(cmd);
-    Serial.printf("[Heltec V3 TX] %s (code: %d)\n", cmd.c_str(), txRes);
+    int txRes = radio.transmit((uint8_t*)&pkt, sizeof(pkt));
+    Serial.printf("[Heltec V3 Binary TX] Cmd: 0x%02X, Param: %u (code: %d)\n", pkt.cmd, pkt.param, txRes);
     rxFlag = false;
     radio.setDio1Action(onDio1);
     radio.startReceive();
@@ -251,6 +273,31 @@ void broadcastBleTelemetry() {
             delay(20);
         }
     }
+}
+
+void parseBinaryTelemetry(const LoRaTelemetryPacket &pkt) {
+    switch (pkt.state) {
+        case STATE_ID_DISARMED:    beaconState = "DISARMED"; break;
+        case STATE_ID_ARMED_TIMER: beaconState = "ARMED_TIMER"; break;
+        case STATE_ID_ACTIVE:      beaconState = "ACTIVE"; break;
+    }
+
+    remainingSec = pkt.remaining_sec;
+    bool usbPwr = (pkt.flags & FLAG_USB_POWER) != 0;
+    beaconBatt = usbPwr ? 0.0F : ((float)pkt.batt_mv / 1000.0F);
+    
+    gpsValid = (pkt.flags & FLAG_GPS_VALID) != 0;
+    beaconLat = (float)pkt.lat_e7 / 1e7;
+    beaconLon = (float)pkt.lon_e7 / 1e7;
+
+    lastRxTime = millis();
+    packetCount++;
+    lastRssi = radio.getRSSI();
+    lastSnr = radio.getSNR();
+    addRssiSample((int)lastRssi);
+    txBatt = readTxBatteryVoltage();
+
+    broadcastBleTelemetry();
 }
 
 void parseTelemetry(const String& jsonStr) {
@@ -771,8 +818,8 @@ void loop() {
         lastTxStatus = activeCommand;
         transmitLoRaCommand(activeCommand);
     }
-    // Asynchronous re-transmit if no telemetry ACK received within 1200ms (accounting for SF10 airtime)
-    else if (activeCommand.length() > 0 && (millis() - activeCommandStart > 1200)) {
+    // Asynchronous re-transmit if no telemetry ACK received within 350ms (fast binary round-trip)
+    else if (activeCommand.length() > 0 && (millis() - activeCommandStart > 350)) {
         activeCommandRetries++;
         if (activeCommandRetries <= 3) {
             activeCommandStart = millis();
@@ -786,14 +833,28 @@ void loop() {
 
     if (rxFlag) {
         rxFlag = false;
-        String str;
-        int state = radio.readData(str);
+        uint8_t rxBuffer[64];
+        int len = radio.getPacketLength();
+        int state = radio.readData(rxBuffer, len > (int)sizeof(rxBuffer) ? sizeof(rxBuffer) : len);
         radio.startReceive();
-        if (state == RADIOLIB_ERR_NONE && str.length() > 0) {
+
+        if (state == RADIOLIB_ERR_NONE && len > 0) {
             activeCommand = ""; // Clear pending command retry upon receiving telemetry!
-            rawJson = str;
-            parseTelemetry(str);
-            Serial.println("[Heltec V3 RX] " + str);
+            
+            // Check if binary telemetry packet
+            if (len >= (int)sizeof(LoRaTelemetryPacket) && rxBuffer[0] == MSG_TYPE_TELEMETRY) {
+                LoRaTelemetryPacket *telPkt = (LoRaTelemetryPacket*)rxBuffer;
+                parseBinaryTelemetry(*telPkt);
+                Serial.printf("[Heltec V3 Binary RX] Seq: %u, State: %u, Batt: %u mV\n", telPkt->seq_num, telPkt->state, telPkt->batt_mv);
+            }
+            // Fallback for legacy JSON string
+            else if (rxBuffer[0] == '{') {
+                String str = "";
+                for (int i = 0; i < len; i++) str += (char)rxBuffer[i];
+                rawJson = str;
+                parseTelemetry(str);
+                Serial.println("[Heltec V3 JSON RX] " + str);
+            }
         }
     }
 
