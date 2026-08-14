@@ -269,7 +269,7 @@
     <header>
         <div class="header-title">
             <h1>📡 Beacon Center</h1>
-            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.3.3</span>
+            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.3.4</span>
             <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
         </div>
         <button id="btnConnectBle" class="btn btn-connect" onclick="toggleWebBluetooth()">📲 Connect BLE</button>
@@ -583,10 +583,12 @@
 
             // Beacon Battery
             const valBatt = document.getElementById('valBatt');
-            if (valBatt && data.batt !== undefined) {
-                if (data.batt > 1.0) {
+            if (valBatt) {
+                if (data.usb) {
+                    valBatt.innerText = (data.raw_batt && data.raw_batt > 2.0) ? `${data.raw_batt.toFixed(2)} V (USB)` : "USB Power";
+                } else if (data.batt !== undefined && data.batt > 1.0) {
                     valBatt.innerText = data.batt.toFixed(2) + " V";
-                } else {
+                } else if (data.batt !== undefined) {
                     valBatt.innerText = "USB Power";
                 }
             }

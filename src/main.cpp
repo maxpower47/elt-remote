@@ -281,6 +281,7 @@ void parseCommand(const String& cmdStr) {
 String generateTelemetry() {
     updateTimerState();
     batteryVoltage = readBatteryVoltage();
+    bool usbPower = (NRF_POWER->USBREGSTATUS & POWER_USBREGSTATUS_VBUSDETECT_Msk) != 0;
 
     StaticJsonDocument<512> doc;
     doc["type"] = "TELEMETRY";
@@ -290,7 +291,11 @@ String generateTelemetry() {
         case ARMED_TIMER: doc["state"] = "ARMED_TIMER"; doc["remaining_sec"] = remainingSeconds; break;
         case ACTIVE:      doc["state"] = "ACTIVE"; break;
     }
-    doc["batt"] = batteryVoltage;
+    doc["batt"] = usbPower ? 0.0F : batteryVoltage;
+    doc["usb"] = usbPower;
+    if (usbPower && batteryVoltage >= 2.5F) {
+        doc["raw_batt"] = batteryVoltage;
+    }
     JsonObject gps = doc.createNestedObject("gps");
     gps["lat"] = lastLat; gps["lon"] = lastLon; gps["valid"] = gpsFixValid;
     String out; serializeJson(doc, out); return out;
