@@ -269,7 +269,7 @@
     <header>
         <div class="header-title">
             <h1>📡 Beacon Center</h1>
-            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.3.4</span>
+            <span style="font-size: 0.7rem; color: var(--accent-blue); background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">v1.3.5</span>
             <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
         </div>
         <button id="btnConnectBle" class="btn btn-connect" onclick="toggleWebBluetooth()">📲 Connect BLE</button>
@@ -565,6 +565,16 @@
             }
         }
 
+        function voltageToPercent(v) {
+            if (!v || v <= 3.3) return 0;
+            if (v >= 4.2) return 100;
+            if (v >= 4.0) return Math.round(80 + ((v - 4.0) / 0.2) * 20);
+            if (v >= 3.8) return Math.round(55 + ((v - 3.8) / 0.2) * 25);
+            if (v >= 3.7) return Math.round(35 + ((v - 3.7) / 0.1) * 20);
+            if (v >= 3.6) return Math.round(15 + ((v - 3.6) / 0.1) * 20);
+            return Math.round(((v - 3.3) / 0.3) * 15);
+        }
+
         function updateDashboard(data) {
             if (!data || typeof data !== 'object') return;
             lastRxTimestamp = Date.now();
@@ -585,11 +595,12 @@
             const valBatt = document.getElementById('valBatt');
             if (valBatt) {
                 if (data.usb) {
-                    valBatt.innerText = (data.raw_batt && data.raw_batt > 2.0) ? `${data.raw_batt.toFixed(2)} V (USB)` : "USB Power";
+                    const raw = data.raw_batt || data.batt;
+                    valBatt.innerText = (raw && raw > 2.0) ? `${voltageToPercent(raw)}% ⚡ (${raw.toFixed(2)}V)` : "USB Power ⚡";
                 } else if (data.batt !== undefined && data.batt > 1.0) {
-                    valBatt.innerText = data.batt.toFixed(2) + " V";
+                    valBatt.innerText = `${voltageToPercent(data.batt)}% (${data.batt.toFixed(2)}V)`;
                 } else if (data.batt !== undefined) {
-                    valBatt.innerText = "USB Power";
+                    valBatt.innerText = "USB Power ⚡";
                 }
             }
 
@@ -597,9 +608,9 @@
             const valTxBatt = document.getElementById('valTxBatt');
             if (valTxBatt) {
                 if (data.tx_batt && data.tx_batt > 1.0) {
-                    valTxBatt.innerText = data.tx_batt.toFixed(2) + " V";
+                    valTxBatt.innerText = `${voltageToPercent(data.tx_batt)}% (${data.tx_batt.toFixed(2)}V)`;
                 } else if (data.tx_batt !== undefined) {
-                    valTxBatt.innerText = "USB Power";
+                    valTxBatt.innerText = "USB Power ⚡";
                 } else {
                     valTxBatt.innerText = "N/A";
                 }

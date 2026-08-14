@@ -382,6 +382,16 @@ String formatTime(uint32_t totalSec) {
     return String(buf);
 }
 
+int voltageToPercent(float v) {
+    if (v <= 3.3F) return 0;
+    if (v >= 4.2F) return 100;
+    if (v >= 4.0F) return 80 + (int)(((v - 4.0F) / 0.2F) * 20.0F);
+    if (v >= 3.8F) return 55 + (int)(((v - 3.8F) / 0.2F) * 25.0F);
+    if (v >= 3.7F) return 35 + (int)(((v - 3.7F) / 0.1F) * 20.0F);
+    if (v >= 3.6F) return 15 + (int)(((v - 3.6F) / 0.1F) * 20.0F);
+    return (int)(((v - 3.3F) / 0.3F) * 15.0F);
+}
+
 void renderScreen0() {
     drawHeader("1. SYSTEM SUMMARY");
 
@@ -401,7 +411,12 @@ void renderScreen0() {
         display.drawString(0, 31, "Timer: " + formatTime(remainingSec) + " remaining");
     } else {
         if (lastRxTime > 0) {
-            String battStr = (beaconBatt > 1.0F) ? (String(beaconBatt, 2) + "V") : "USB Power";
+            String battStr;
+            if (beaconBatt > 1.0F) {
+                battStr = String(voltageToPercent(beaconBatt)) + "% (" + String(beaconBatt, 2) + "V)";
+            } else {
+                battStr = "USB Power";
+            }
             display.drawString(0, 31, "Bcn Batt: " + battStr);
         } else {
             display.drawString(0, 31, "Bcn Batt: N/A");
