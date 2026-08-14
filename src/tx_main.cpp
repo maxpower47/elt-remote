@@ -525,15 +525,26 @@ void renderScreen1() {
 
     display.setFont(ArialMT_Plain_10);
     if (lastRxTime > 0 && gpsValid) {
-        display.drawString(0, 15, "CAP: " + getCapCellGrid(beaconLat, beaconLon));
+        // Line 1: CAP Grid and Fix status
+        display.drawString(0, 15, "CAP: " + getCapCellGrid(beaconLat, beaconLon) + "  [3D FIX]");
+        
+        // Line 2 & 3: DMS Coordinates
         display.drawString(0, 27, "Lat: " + decimalToDMS(beaconLat, true));
         display.drawString(0, 39, "Lon: " + decimalToDMS(beaconLon, false));
-        display.drawString(0, 51, "Fix: 3D VALID  |  Rx: " + String(ageSec) + "s");
+        
+        // Line 4: Distance & Compass Heading (calculated from base coordinates)
+        float distM = calculateDistanceMeters(34.0522F, -118.2437F, beaconLat, beaconLon);
+        float brng = calculateBearing(34.0522F, -118.2437F, beaconLat, beaconLon);
+
+        String distStr = (distM >= 1000.0F) ? (String(distM / 1000.0F, 2) + "km") : (String((int)distM) + "m");
+        String brngStr = String((int)brng) + "° " + String(getCardinalDirection(brng));
+
+        display.drawString(0, 51, "Dst: " + distStr + " | Hdg: " + brngStr);
     } else {
         display.drawString(0, 15, "CAP: --");
         display.drawString(0, 27, "Lat: 0°00'00.0\"N");
         display.drawString(0, 39, "Lon: 0°00'00.0\"W");
-        display.drawString(0, 51, isLost ? "LINK LOST (STALE)" : "Fix: NO GPS FIX");
+        display.drawString(0, 51, isLost ? "LINK LOST (STALE)" : "Dst: -- | Hdg: --");
     }
 }
 
