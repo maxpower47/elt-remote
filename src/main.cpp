@@ -268,7 +268,7 @@ void parseCommand(const String& cmdStr) {
         }
 
         // Transmit over LoRa for distant Heltec units
-        delay(150);
+        delay(250);
         String payload = generateTelemetry();
         radio.clearDio1Action();
         radio.transmit(payload);
@@ -393,10 +393,10 @@ void setup() {
     Bluefruit.Advertising.setFastTimeout(30);
     Bluefruit.Advertising.start(0);
 
-    int state = radio.begin(915.0, 125.0, 7, 5, 0x34, 22, 8, 1.8, false);
+    int state = radio.begin(915.0, 125.0, 10, 6, 0x34, 22, 8, 1.8, false);
 
     if (state == RADIOLIB_ERR_NONE) {
-        Serial.println("[RAK4631] RadioLib OK");
+        Serial.println("[RAK4631] RadioLib OK (SF10 / CR6 / 22dBm)");
         radio.setDio2AsRfSwitch(true);
         uint8_t sw[] = {0x34, 0x44};
         radio.setSyncWord(sw, 2);
@@ -423,7 +423,7 @@ void loop() {
     }
 
     static uint32_t lastTx = 0;
-    if (millis() - lastTx > 3000) {
+    if (millis() - lastTx > 10000) {
         lastTx = millis();
         ledSet(HW_LED_GREEN, true);
         String payload = generateTelemetry();

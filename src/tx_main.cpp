@@ -396,7 +396,7 @@ void renderScreen0() {
     drawHeader("1. SYSTEM SUMMARY");
 
     uint32_t ageSec = (lastRxTime > 0) ? (millis() - lastRxTime) / 1000 : 0;
-    bool isLost = (lastRxTime > 0 && ageSec >= 30);
+    bool isLost = (lastRxTime > 0 && ageSec >= 35);
     String displayState = isLost ? "LOST LINK" : beaconState;
 
     display.setFont(ArialMT_Plain_10);
@@ -705,9 +705,9 @@ void setup() {
     pAdvertising->setScanResponse(true);
     pAdvertising->start();
 
-    int state = radio.begin(915.0, 125.0, 7, 5, 0x34, 22, 8, 1.6, false);
+    int state = radio.begin(915.0, 125.0, 10, 6, 0x34, 22, 8, 1.6, false);
     if (state == RADIOLIB_ERR_NONE) {
-        Serial.println("[Heltec V3 RadioLib] Init SUCCESS!");
+        Serial.println("[Heltec V3 RadioLib] Init SUCCESS! (SF10 / CR6 / 22dBm)");
         radio.setDio2AsRfSwitch(true);
         uint8_t syncWordBytes[] = {0x34, 0x44};
         radio.setSyncWord(syncWordBytes, 2);
@@ -735,8 +735,8 @@ void loop() {
         lastTxStatus = activeCommand;
         transmitLoRaCommand(activeCommand);
     }
-    // Asynchronous re-transmit if no telemetry ACK received within 500ms
-    else if (activeCommand.length() > 0 && (millis() - activeCommandStart > 500)) {
+    // Asynchronous re-transmit if no telemetry ACK received within 1200ms (accounting for SF10 airtime)
+    else if (activeCommand.length() > 0 && (millis() - activeCommandStart > 1200)) {
         activeCommandRetries++;
         if (activeCommandRetries <= 3) {
             activeCommandStart = millis();
