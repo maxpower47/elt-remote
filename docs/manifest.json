@@ -1,6 +1,6 @@
 {
-  "name": "LoRa Beacon Command Center",
-  "short_name": "LoRa Beacon",
+  "name": "Practice Beacon Remote",
+  "short_name": "Beacon Remote",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#0f172a",
