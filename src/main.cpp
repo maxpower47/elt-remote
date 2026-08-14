@@ -25,7 +25,7 @@ using namespace Adafruit_LittleFS_Namespace;
 #define HW_MOSFET_TRIG_PIN  20         // P0.20 — RAK19003 J7 Header "TX" Pad (3.3V Logic)
 
 #undef PIN_VBAT
-#define PIN_VBAT            A2         // D16 / P0.30 / AIN6 on RAK19003 Mini Baseboard
+#define PIN_VBAT            A1         // D15 / P0.05 / AIN3 — Hardware Battery Divider on RAK Baseboard
 
 #define STATE_FILE_PATH     "/beacon_state.bin"
 
@@ -197,16 +197,16 @@ float readBatteryVoltage() {
     analogReference(AR_INTERNAL_3_0);
     analogReadResolution(12);
 
-    // Discard first sample to settle SAADC
+    // Discard initial sample to settle SAADC
     analogRead(PIN_VBAT);
     delayMicroseconds(50);
 
     uint32_t rawSum = 0;
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 8; i++) {
         rawSum += analogRead(PIN_VBAT);
         delayMicroseconds(50);
     }
-    float rawAvg = (float)rawSum / 4.0F;
+    float rawAvg = (float)rawSum / 8.0F;
     // 3.0V reference / 4096 * 1.73 divider compensation
     float vbat = (rawAvg * 3.0F / 4096.0F) * 1.73F;
     if (vbat < 2.0F) return 0.0F; // Below 2.0V = USB power / no battery
