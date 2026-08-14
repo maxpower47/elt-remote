@@ -67,7 +67,26 @@
 
 ## 3. Development, Build & Upload Rules
 
-### PlatformIO Environments:
+### Automated Build Script (`./build.sh`):
+A unified bash build script is provided at the repository root:
+- **Build both devices**:
+  ```bash
+  ./build.sh all
+  ```
+- **Build and upload RAK4631**:
+  ```bash
+  ./build.sh beacon --upload
+  ```
+- **Build and upload Heltec V3**:
+  ```bash
+  ./build.sh remote --upload
+  ```
+- **Clean builds**:
+  ```bash
+  ./build.sh clean
+  ```
+
+### Direct PlatformIO Commands:
 - **RAK4631**:
   ```bash
   pio run -e wiscore_rak4631 --target upload
