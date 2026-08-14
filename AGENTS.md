@@ -67,8 +67,12 @@
 
 ## 3. Development, Build & Upload Rules
 
-### Automated Build Script (`./build.sh`):
+### Automated Build & Test Script (`./build.sh`):
 A unified bash build script is provided at the repository root:
+- **Run all unit tests (C++ Native & JS)**:
+  ```bash
+  ./build.sh test
+  ```
 - **Build both devices**:
   ```bash
   ./build.sh all
@@ -87,6 +91,14 @@ A unified bash build script is provided at the repository root:
   ```
 
 ### Direct PlatformIO Commands:
+- **Run C++ Native Tests**:
+  ```bash
+  pio test -e native
+  ```
+- **Run JS Tests**:
+  ```bash
+  node test/dashboard_test.js
+  ```
 - **RAK4631**:
   ```bash
   pio run -e wiscore_rak4631 --target upload

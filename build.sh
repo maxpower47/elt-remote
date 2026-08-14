@@ -8,18 +8,20 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_DIR"
 
 usage() {
-    echo "Usage: $0 [beacon|remote|all|clean] [--upload]"
+    echo "Usage: $0 [beacon|remote|all|test|clean] [--upload]"
     echo ""
     echo "Targets:"
     echo "  beacon    Build RAK4631 WisBlock Beacon firmware"
     echo "  remote    Build Heltec WiFi LoRa 32 V3 Remote firmware"
     echo "  all       Build firmware for both devices (default)"
+    echo "  test      Run C++ Native & JavaScript Unit Test Suites"
     echo "  clean     Clean build artifacts"
     echo ""
     echo "Options:"
     echo "  --upload  Upload firmware to connected hardware after build"
     echo ""
     echo "Examples:"
+    echo "  $0 test               # Run all C++ and JS unit tests"
     echo "  $0 beacon --upload    # Build and upload to RAK4631"
     echo "  $0 remote --upload    # Build and upload to Heltec V3"
     echo "  $0 all                # Compile both environments"
@@ -34,6 +36,7 @@ for arg in "$@"; do
         beacon)   TARGET="beacon" ;;
         remote)   TARGET="remote" ;;
         all)      TARGET="all" ;;
+        test)     TARGET="test" ;;
         clean)    TARGET="clean" ;;
         --upload) DO_UPLOAD=true ;;
         -h|--help) usage ;;
@@ -59,6 +62,14 @@ build_remote() {
     fi
 }
 
+run_tests() {
+    echo "==> [1/2] Running C++ Native Unity Unit Tests..."
+    pio test -e native
+    echo ""
+    echo "==> [2/2] Running JavaScript Unit Tests..."
+    node test/dashboard_test.js
+}
+
 clean_builds() {
     echo "==> Cleaning build directories..."
     pio run --target clean
@@ -74,6 +85,9 @@ case "$TARGET" in
     all)
         build_beacon
         build_remote
+        ;;
+    test)
+        run_tests
         ;;
     clean)
         clean_builds
