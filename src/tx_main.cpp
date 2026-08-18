@@ -788,12 +788,13 @@ void setup() {
     pAdvertising->setScanResponse(true);
     pAdvertising->start();
 
-    int state = radio.begin(915.0, 125.0, 10, 6, 0x34, 22, 8, 1.6, false);
+    int state = radio.begin(915.0, 125.0, 12, 8, 0x34, 22, 16, 1.6, false);
     if (state == RADIOLIB_ERR_NONE) {
-        Serial.println("[Heltec V3 RadioLib] Init SUCCESS! (SF10 / CR6 / 22dBm)");
+        Serial.println("[Heltec V3 RadioLib] Init SUCCESS! (SF12 / CR8 / 16-Sym Preamble / 22dBm)");
         radio.setDio2AsRfSwitch(true);
         uint8_t syncWordBytes[] = {0x34, 0x44};
         radio.setSyncWord(syncWordBytes, 2);
+        radio.autoLDRO();
         radio.setDio1Action(onDio1);
         radio.startReceive();
     } else {
@@ -818,8 +819,8 @@ void loop() {
         lastTxStatus = activeCommand;
         transmitLoRaCommand(activeCommand);
     }
-    // Asynchronous re-transmit if no telemetry ACK received within 350ms (fast binary round-trip)
-    else if (activeCommand.length() > 0 && (millis() - activeCommandStart > 350)) {
+    // Asynchronous re-transmit if no telemetry ACK received within 650ms (accommodating SF12 airtime)
+    else if (activeCommand.length() > 0 && (millis() - activeCommandStart > 650)) {
         activeCommandRetries++;
         if (activeCommandRetries <= 3) {
             activeCommandStart = millis();
@@ -834,15 +835,16 @@ void loop() {
     if (rxFlag) {
         rxFlag = false;
         uint8_t rxBuffer[64];
-        int len = radio.getPacketLength();
-        int state = radio.readData(rxBuffer, len > (int)sizeof(rxBuffer) ? sizeof(rxBuffer) : len);
+        memset(rxBuffer, 0, sizeof(rxBuffer));
+        int state = radio.readData(rxBuffer, 0);
+        size_t len = radio.getPacketLength();
         radio.startReceive();
 
         if (state == RADIOLIB_ERR_NONE && len > 0) {
             activeCommand = ""; // Clear pending command retry upon receiving telemetry!
             
             // Check if binary telemetry packet
-            if (len >= (int)sizeof(LoRaTelemetryPacket) && rxBuffer[0] == MSG_TYPE_TELEMETRY) {
+            if (len >= sizeof(LoRaTelemetryPacket) && rxBuffer[0] == MSG_TYPE_TELEMETRY) {
                 LoRaTelemetryPacket *telPkt = (LoRaTelemetryPacket*)rxBuffer;
                 parseBinaryTelemetry(*telPkt);
                 Serial.printf("[Heltec V3 Binary RX] Seq: %u, State: %u, Batt: %u mV\n", telPkt->seq_num, telPkt->state, telPkt->batt_mv);
@@ -850,7 +852,7 @@ void loop() {
             // Fallback for legacy JSON string
             else if (rxBuffer[0] == '{') {
                 String str = "";
-                for (int i = 0; i < len; i++) str += (char)rxBuffer[i];
+                for (size_t i = 0; i < len; i++) str += (char)rxBuffer[i];
                 rawJson = str;
                 parseTelemetry(str);
                 Serial.println("[Heltec V3 JSON RX] " + str);

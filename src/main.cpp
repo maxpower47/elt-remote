@@ -311,11 +311,11 @@ void executeCommand(uint8_t cmdId, uint32_t param) {
     delay(50);
     LoRaTelemetryPacket pkt;
     generateBinaryTelemetry(pkt);
-    //radio.clearDio1Action();
+    radio.clearDio1Action();
     radio.transmit((uint8_t*)&pkt, sizeof(pkt));
-    //rxFlag = false;
-    //radio.setDio1Action(onDio1);
-    //radio.startReceive();
+    rxFlag = false;
+    radio.setDio1Action(onDio1);
+    radio.startReceive();
 }
 
 String generateTelemetry() {
@@ -433,13 +433,14 @@ void setup() {
     Bluefruit.Advertising.setFastTimeout(30);
     Bluefruit.Advertising.start(0);
 
-    int state = radio.begin(915.0, 125.0, 10, 6, 0x34, 22, 8, 1.8, false);
+    int state = radio.begin(915.0, 125.0, 12, 8, 0x34, 22, 16, 1.8, false);
 
     if (state == RADIOLIB_ERR_NONE) {
-        Serial.println("[RAK4631] RadioLib OK (SF10 / CR6 / 22dBm)");
+        Serial.println("[RAK4631] RadioLib OK (SF12 / CR8 / 16-Sym Preamble / 22dBm)");
         radio.setDio2AsRfSwitch(true);
         uint8_t sw[] = {0x34, 0x44};
         radio.setSyncWord(sw, 2);
+        radio.autoLDRO();
         radio.setDio1Action(onDio1);
         radio.startReceive();
         blinkCode(HW_LED_GREEN, 3, 300);
