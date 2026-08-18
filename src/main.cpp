@@ -433,10 +433,10 @@ void setup() {
     Bluefruit.Advertising.setFastTimeout(30);
     Bluefruit.Advertising.start(0);
 
-    int state = radio.begin(915.0, 125.0, 12, 8, 0x34, 22, 16, 1.8, false);
+    int state = radio.begin(915.0, 125.0, 11, 8, 0x34, 22, 16, 1.8, false);
 
     if (state == RADIOLIB_ERR_NONE) {
-        Serial.println("[RAK4631] RadioLib OK (SF12 / CR8 / 16-Sym Preamble / 22dBm)");
+        Serial.println("[RAK4631] RadioLib OK (SF11 / CR8 / 16-Sym Preamble / 22dBm)");
         radio.setDio2AsRfSwitch(true);
         uint8_t sw[] = {0x34, 0x44};
         radio.setSyncWord(sw, 2);

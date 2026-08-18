@@ -788,9 +788,9 @@ void setup() {
     pAdvertising->setScanResponse(true);
     pAdvertising->start();
 
-    int state = radio.begin(915.0, 125.0, 12, 8, 0x34, 22, 16, 1.6, false);
+    int state = radio.begin(915.0, 125.0, 11, 8, 0x34, 22, 16, 1.6, false);
     if (state == RADIOLIB_ERR_NONE) {
-        Serial.println("[Heltec V3 RadioLib] Init SUCCESS! (SF12 / CR8 / 16-Sym Preamble / 22dBm)");
+        Serial.println("[Heltec V3 RadioLib] Init SUCCESS! (SF11 / CR8 / 16-Sym Preamble / 22dBm)");
         radio.setDio2AsRfSwitch(true);
         uint8_t syncWordBytes[] = {0x34, 0x44};
         radio.setSyncWord(syncWordBytes, 2);
@@ -819,8 +819,8 @@ void loop() {
         lastTxStatus = activeCommand;
         transmitLoRaCommand(activeCommand);
     }
-    // Asynchronous re-transmit if no telemetry ACK received within 650ms (accommodating SF12 airtime)
-    else if (activeCommand.length() > 0 && (millis() - activeCommandStart > 650)) {
+    // Asynchronous re-transmit if no telemetry ACK received within 450ms (accommodating SF11 airtime)
+    else if (activeCommand.length() > 0 && (millis() - activeCommandStart > 450)) {
         activeCommandRetries++;
         if (activeCommandRetries <= 3) {
             activeCommandStart = millis();

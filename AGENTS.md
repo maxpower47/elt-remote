@@ -31,7 +31,7 @@
 ### LoRa RadioLib Parameters:
 - **Frequency**: `915.0 MHz` (US ISM Band)
 - **Bandwidth**: `125.0 kHz`
-- **Spreading Factor**: `SF12` (Maximum extreme sensitivity: -137.5 dBm)
+- **Spreading Factor**: `SF11` (High extreme sensitivity: -135.5 dBm)
 - **Coding Rate**: `CR 4/8` (CR = 8: Maximum 4/8 Forward Error Correction)
 - **Sync Word**: `{0x34, 0x44}` (Private Network)
 - **Output Power**: `+22 dBm`
@@ -39,7 +39,7 @@
 - **Low Data Rate Optimization**: `radio.autoLDRO()` enabled
 - **Beacon Telemetry Interval**: Every `10,000 ms` (10 seconds)
 - **Command Turnaround Delay**: `50 ms`
-- **Command Retry Engine (Heltec V3)**: Asynchronous non-blocking retries every `650 ms` (up to 3 retries).
+- **Command Retry Engine (Heltec V3)**: Asynchronous non-blocking retries every `450 ms` (up to 3 retries).
 
 ### Binary Over-the-Air Protocol (`src/protocol_binary.h`):
 - **Telemetry Packet (`0x01`)** — **18 Bytes Total** (~90 ms on SF10 vs 540 ms JSON):
