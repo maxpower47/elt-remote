@@ -311,11 +311,11 @@ void executeCommand(uint8_t cmdId, uint32_t param) {
     delay(50);
     LoRaTelemetryPacket pkt;
     generateBinaryTelemetry(pkt);
-    radio.clearDio1Action();
+    //radio.clearDio1Action();
     radio.transmit((uint8_t*)&pkt, sizeof(pkt));
-    rxFlag = false;
-    radio.setDio1Action(onDio1);
-    radio.startReceive();
+    //rxFlag = false;
+    //radio.setDio1Action(onDio1);
+    //radio.startReceive();
 }
 
 String generateTelemetry() {
@@ -454,13 +454,18 @@ void loop() {
     if (rxFlag) {
         rxFlag = false;
         uint8_t rxBuffer[64];
-        int len = radio.getPacketLength();
-        int state = radio.readData(rxBuffer, len > (int)sizeof(rxBuffer) ? sizeof(rxBuffer) : len);
+        memset(rxBuffer, 0, sizeof(rxBuffer));
+        int state = radio.readData(rxBuffer, 0);
+        size_t len = radio.getPacketLength();
+        
+        // Always re-arm DIO1 and restart reception
+        radio.clearDio1Action();
+        radio.setDio1Action(onDio1);
         radio.startReceive();
 
         if (state == RADIOLIB_ERR_NONE && len > 0) {
             // Check if binary command packet
-            if (len >= (int)sizeof(LoRaCommandPacket) && rxBuffer[0] == MSG_TYPE_COMMAND) {
+            if (len >= sizeof(LoRaCommandPacket) && rxBuffer[0] == MSG_TYPE_COMMAND) {
                 LoRaCommandPacket *cmdPkt = (LoRaCommandPacket*)rxBuffer;
                 Serial.printf("[RX Binary Cmd] Type: 0x%02X, Cmd: 0x%02X, Param: %u\n", cmdPkt->msg_type, cmdPkt->cmd, cmdPkt->param);
                 executeCommand(cmdPkt->cmd, cmdPkt->param);
@@ -468,7 +473,7 @@ void loop() {
             // Fallback for legacy JSON string
             else if (rxBuffer[0] == '{') {
                 String str = "";
-                for (int i = 0; i < len; i++) str += (char)rxBuffer[i];
+                for (size_t i = 0; i < len; i++) str += (char)rxBuffer[i];
                 Serial.println("[RX JSON Cmd] " + str);
                 parseCommand(str);
             }
@@ -502,5 +507,5 @@ void loop() {
         }
     }
 
-    waitForEvent();
+    delay(10);
 }
