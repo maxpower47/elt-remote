@@ -5,20 +5,22 @@
 #include <NimBLEDevice.h>
 #include <Wire.h>
 #include <SSD1306Wire.h>
+#include <esp_task_wdt.h>
+#include "freertos/queue.h"
 #include "protocol_binary.h"
 
 #define PIN_BUTTON   0
 #define PIN_VEXT     36
 #define PIN_OLED_RST 21
 
+// Heltec V3 Battery ADC: voltage divider output on GPIO 1, enable switch on GPIO 37
+#define PIN_VBAT_ADC 1
+#define PIN_ADC_CTRL 37
+
 #define LORA_CS      8
 #define LORA_DIO1    14
 #define LORA_RST     12
 #define LORA_BUSY    13
-
-// Heltec V3 Battery Hardware Pins
-#define PIN_VBAT_ADC 1   // GPIO 1 / ADC1_CH0
-#define PIN_ADC_CTRL 37  // Power switch for battery divider
 
 // BLE Service & Characteristic UUIDs (Nordic UART Service - NUS)
 #define SERVICE_UUID           "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
@@ -26,13 +28,14 @@
 #define CHARACTERISTIC_UUID_TX "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 
 SX1262 radio = new Module(LORA_CS, LORA_DIO1, LORA_RST, LORA_BUSY);
-static SSD1306Wire display(0x3c, SDA_OLED, SCL_OLED, GEOMETRY_128_64);
+static SSD1306Wire display(0x3c, SDA_OLED, SCL_OLED, GEOMETRY_128_64, I2C_ONE, 100000);
 
 BLEServer *pServer = NULL;
 BLECharacteristic *pTxCharacteristic = NULL;
 bool deviceConnected = false;
 
-String pendingCommandToSend = "";
+#define BLE_CMD_MAX_LEN 128
+QueueHandle_t bleCommandQueue = NULL;
 String lastTxStatus = "Ready";
 
 // Telemetry & State Data
@@ -64,11 +67,6 @@ int selectedMenuItem = 0;
 int menuMode = 0;
 int selectedHours = 1;
 
-volatile bool rxFlag = false;
-void IRAM_ATTR onDio1() {
-    rxFlag = true;
-}
-
 // Precise Battery & USB Power Detection for Heltec V3
 float readTxBatteryVoltage() {
     analogSetPinAttenuation(PIN_VBAT_ADC, ADC_11db);
@@ -92,6 +90,84 @@ float readTxBatteryVoltage() {
     return vbat;
 }
 
+volatile bool rxFlag = false;
+volatile bool txDoneFlag = false;
+volatile bool txInProgress = false;
+uint32_t txStartMs = 0;
+#define TX_TIMEOUT_MS 2000
+
+void IRAM_ATTR onDio1() {
+    if (txInProgress) {
+        txDoneFlag = true;
+    } else {
+        rxFlag = true;
+    }
+}
+
+uint8_t heltecTxSeq = 0;
+LoRaCommandPacket lastSentPacket;
+
+void recoverRadio() {
+    Serial.println("[Heltec V3] Watchdog: Recovering SX1262 Radio...");
+    digitalWrite(LORA_RST, LOW); delay(20);
+    digitalWrite(LORA_RST, HIGH); delay(100);
+
+    int state = radio.begin(915.0, 125.0, 11, 8, 0x34, 22, 16, 1.6, false);
+    if (state == RADIOLIB_ERR_NONE) {
+        radio.setDio2AsRfSwitch(true);
+        uint8_t syncWordBytes[] = {0x34, 0x44};
+        radio.setSyncWord(syncWordBytes, 2);
+        radio.autoLDRO();
+        radio.setDio1Action(onDio1);
+        radio.startReceive();
+        Serial.println("[Heltec V3] Watchdog: Radio recovered successfully!");
+    } else {
+        Serial.printf("[Heltec V3] Watchdog: Radio recovery failed (%d)\n", state);
+    }
+}
+
+// Non-blocking command transmit using startTransmit().
+// Returns immediately; TX completion is signalled via txDoneFlag in loop().
+void transmitLoRaCommand(String cmd) {
+    LoRaCommandPacket pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.msg_type = MSG_TYPE_COMMAND;
+    pkt.seq_num = ++heltecTxSeq;
+
+    String cmdStr = cmd;
+    StaticJsonDocument<128> doc;
+    DeserializationError jsonErr = deserializeJson(doc, cmd);
+    if (jsonErr == DeserializationError::Ok && doc.containsKey("cmd")) {
+        cmdStr = doc["cmd"].as<String>();
+    }
+
+    if (cmdStr == "DISARM") {
+        pkt.cmd = CMD_DISARM;
+    } else if (cmdStr == "ARM_NOW") {
+        pkt.cmd = CMD_ARM_NOW;
+    } else if (cmdStr == "ARM_TIMER") {
+        pkt.cmd = CMD_ARM_TIMER;
+        if (jsonErr == DeserializationError::Ok && doc.containsKey("sec")) {
+            pkt.param = doc["sec"].as<uint32_t>();
+        } else {
+            pkt.param = selectedHours * 3600;
+        }
+    }
+
+    lastSentPacket = pkt;
+    txInProgress = true;
+    txDoneFlag = false;
+    txStartMs = millis();
+    radio.clearDio1Action();
+    int res = radio.startTransmit((uint8_t*)&pkt, sizeof(pkt));
+    radio.setDio1Action(onDio1);
+    Serial.printf("[Heltec V3 Binary TX] Cmd: 0x%02X, Param: %u (startTransmit: %d)\n", pkt.cmd, pkt.param, res);
+    if (res != RADIOLIB_ERR_NONE) {
+        txInProgress = false;
+        recoverRadio();
+    }
+}
+
 void broadcastBleTelemetry();
 void parseTelemetry(const String& jsonStr);
 
@@ -107,35 +183,7 @@ class MyServerCallbacks: public BLEServerCallbacks {
     }
 };
 
-uint8_t heltecTxSeq = 0;
 
-void transmitLoRaCommand(String cmd) {
-    LoRaCommandPacket pkt;
-    memset(&pkt, 0, sizeof(pkt));
-    pkt.msg_type = MSG_TYPE_COMMAND;
-    pkt.seq_num = ++heltecTxSeq;
-
-    if (cmd == "DISARM" || cmd.indexOf("DISARM") >= 0) {
-        pkt.cmd = CMD_DISARM;
-    } else if (cmd == "ARM_NOW" || cmd.indexOf("ARM_NOW") >= 0) {
-        pkt.cmd = CMD_ARM_NOW;
-    } else if (cmd.indexOf("ARM_TIMER") >= 0) {
-        pkt.cmd = CMD_ARM_TIMER;
-        StaticJsonDocument<128> doc;
-        if (deserializeJson(doc, cmd) == DeserializationError::Ok && doc.containsKey("sec")) {
-            pkt.param = doc["sec"].as<uint32_t>();
-        } else {
-            pkt.param = selectedHours * 3600;
-        }
-    }
-
-    radio.clearDio1Action();
-    int txRes = radio.transmit((uint8_t*)&pkt, sizeof(pkt));
-    Serial.printf("[Heltec V3 Binary TX] Cmd: 0x%02X, Param: %u (code: %d)\n", pkt.cmd, pkt.param, txRes);
-    rxFlag = false;
-    radio.setDio1Action(onDio1);
-    radio.startReceive();
-}
 
 class MyCallbacks: public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic) {
@@ -143,10 +191,28 @@ class MyCallbacks: public NimBLECharacteristicCallbacks {
         String input = String(val.c_str());
         input.trim();
         Serial.println("[NimBLE onWrite] Received: " + input);
-        if (input.startsWith("{")) {
-            pendingCommandToSend = input;
-            lastTxStatus = "BLE Cmd Received";
+        
+        static String bleAccumBuffer;
+        bleAccumBuffer += String(val.c_str());
+        
+        int depth = 0;
+        for (int i = 0; i < bleAccumBuffer.length(); i++) {
+            if (bleAccumBuffer[i] == '{') depth++;
+            else if (bleAccumBuffer[i] == '}') {
+                depth--;
+                if (depth == 0) {
+                    String complete = bleAccumBuffer.substring(0, i + 1);
+                    bleAccumBuffer = bleAccumBuffer.substring(i + 1);
+                    char cmdBuf[BLE_CMD_MAX_LEN];
+                    memset(cmdBuf, 0, sizeof(cmdBuf));
+                    strncpy(cmdBuf, complete.c_str(), BLE_CMD_MAX_LEN - 1);
+                    xQueueSend(bleCommandQueue, cmdBuf, 0);
+                    lastTxStatus = "BLE Cmd Received";
+                    break;
+                }
+            }
         }
+        if (bleAccumBuffer.length() > 256) bleAccumBuffer = "";
     }
 };
 
@@ -161,23 +227,45 @@ void triggerToastPopup(const String& msg) {
     popupToastUntilMs = millis() + 2500; // Display for 2.5s
 }
 
+volatile uint32_t isrPressDownMs = 0;
+volatile uint32_t isrPressUpMs = 0;
+volatile uint32_t isrPressCount = 0;
+
+void IRAM_ATTR onButtonIsr() {
+    int state = digitalRead(PIN_BUTTON);
+    uint32_t now = millis();
+    if (state == LOW) {
+        // Falling edge: Button pressed down
+        if (isrPressDownMs == 0) {
+            isrPressDownMs = now;
+        }
+        buttonWasPressedGlob = true;
+    } else {
+        // Rising edge: Button released up
+        isrPressUpMs = now;
+        isrPressCount++;
+        buttonWasPressedGlob = false;
+    }
+}
+
 void handleButton() {
-    int btnState = digitalRead(PIN_BUTTON);
+    static uint32_t lastProcessedPressCount = 0;
+    static uint32_t lastProcessedPressTime = 0;
+    static bool longPressHandled = false;
     uint32_t now = millis();
 
-    if (btnState == LOW) {
-        if (!buttonWasPressedGlob) {
-            buttonWasPressedGlob = true;
-            buttonPressStartGlob = now;
-            longPressTriggeredGlob = false;
-        } else if (!longPressTriggeredGlob && (now - buttonPressStartGlob >= 1000)) {
-            // TRIGGER INSTANTLY AT 1000ms HOLD THRESHOLD (WHILE STILL HELD DOWN)
-            longPressTriggeredGlob = true;
+    int pinLevel = digitalRead(PIN_BUTTON);
+
+    // 1. Check for Active Long Press (While button is still held down)
+    if (pinLevel == LOW && isrPressDownMs > 0 && !longPressHandled) {
+        if (now - isrPressDownMs >= 650) {
+            longPressHandled = true;
 
             if (currentScreen == 2) {
                 if (menuMode == 1) {
                     uint32_t sec = (uint32_t)selectedHours * 3600;
-                    pendingCommandToSend = "{\"cmd\":\"ARM_TIMER\",\"sec\":" + String(sec) + "}";
+                    String c = "{\"cmd\":\"ARM_TIMER\",\"sec\":" + String(sec) + "}";
+                    char cBuf[BLE_CMD_MAX_LEN]; memset(cBuf, 0, sizeof(cBuf)); strncpy(cBuf, c.c_str(), BLE_CMD_MAX_LEN - 1); xQueueSend(bleCommandQueue, cBuf, 0);
                     lastTxStatus = "Sending " + String(selectedHours) + "h Timer...";
                     triggerToastPopup("✓ " + String(selectedHours) + "h TIMER SENT!");
                     menuMode = 0;
@@ -186,21 +274,27 @@ void handleButton() {
                 } else {
                     switch (selectedMenuItem) {
                         case 0:
-                            pendingCommandToSend = "{\"cmd\":\"ARM_NOW\"}";
-                            lastTxStatus = "Sending Arm Now...";
-                            triggerToastPopup("✓ COMMAND SENT!");
-                            selectedMenuItem = 0;
-                            currentScreen = 0;
+                            {
+                                String c = "{\"cmd\":\"ARM_NOW\"}";
+                                char cBuf[BLE_CMD_MAX_LEN]; memset(cBuf, 0, sizeof(cBuf)); strncpy(cBuf, c.c_str(), BLE_CMD_MAX_LEN - 1); xQueueSend(bleCommandQueue, cBuf, 0);
+                                lastTxStatus = "Sending Arm Now...";
+                                triggerToastPopup("✓ COMMAND SENT!");
+                                selectedMenuItem = 0;
+                                currentScreen = 0;
+                            }
                             break;
                         case 1:
                             menuMode = 1;
                             break;
                         case 2:
-                            pendingCommandToSend = "{\"cmd\":\"DISARM\"}";
-                            lastTxStatus = "Sending Disarm...";
-                            triggerToastPopup("✓ DISARM SENT!");
-                            selectedMenuItem = 0;
-                            currentScreen = 0;
+                            {
+                                String c = "{\"cmd\":\"DISARM\"}";
+                                char cBuf[BLE_CMD_MAX_LEN]; memset(cBuf, 0, sizeof(cBuf)); strncpy(cBuf, c.c_str(), BLE_CMD_MAX_LEN - 1); xQueueSend(bleCommandQueue, cBuf, 0);
+                                lastTxStatus = "Sending Disarm...";
+                                triggerToastPopup("✓ DISARM SENT!");
+                                selectedMenuItem = 0;
+                                currentScreen = 0;
+                            }
                             break;
                     }
                 }
@@ -209,28 +303,46 @@ void handleButton() {
                 menuMode = 0;
             }
         }
-    } else if (btnState == HIGH && buttonWasPressedGlob) {
-        uint32_t pressDuration = now - buttonPressStartGlob;
-        buttonWasPressedGlob = false;
+    }
 
-        // SHORT CLICK (only if long press wasn't already triggered while held down)
-        if (!longPressTriggeredGlob && pressDuration > 50) {
-            if (currentScreen == 2) {
-                if (menuMode == 1) {
-                    selectedHours++;
-                    if (selectedHours > 72) selectedHours = 1;
-                } else {
-                    selectedMenuItem++;
-                    if (selectedMenuItem >= TOTAL_MENU_ITEMS) {
-                        selectedMenuItem = 0;
-                        currentScreen = 3; // Advance to Screen 4 (Signal Analyzer)
+    // 2. Check for Short Click (Triggered on Release)
+    if (isrPressCount != lastProcessedPressCount) {
+        lastProcessedPressCount = isrPressCount;
+
+        uint32_t pressStart = isrPressDownMs;
+        uint32_t pressEnd = isrPressUpMs;
+
+        // Reset press start now that release occurred
+        isrPressDownMs = 0;
+
+        if (pressEnd >= pressStart && (pressEnd - lastProcessedPressTime > 120)) {
+            uint32_t holdDuration = pressEnd - pressStart;
+
+            if (!longPressHandled && holdDuration >= 10 && holdDuration < 650) {
+                lastProcessedPressTime = pressEnd;
+
+                // SHORT CLICK
+                if (currentScreen == 2) {
+                    if (menuMode == 1) {
+                        selectedHours++;
+                        if (selectedHours > 72) selectedHours = 1;
+                    } else {
+                        selectedMenuItem++;
+                        if (selectedMenuItem >= TOTAL_MENU_ITEMS) {
+                            selectedMenuItem = 0;
+                            currentScreen = 3; // Advance to Screen 4 (Signal Analyzer)
+                        }
                     }
+                } else {
+                    currentScreen = (currentScreen + 1) % TOTAL_SCREENS;
                 }
-            } else {
-                currentScreen = (currentScreen + 1) % TOTAL_SCREENS;
             }
         }
-        longPressTriggeredGlob = false;
+    }
+
+    if (pinLevel == HIGH) {
+        longPressHandled = false;
+        buttonWasPressedGlob = false;
     }
 }
 
@@ -376,12 +488,13 @@ void drawBatteryIcon(int x, int y, float vbat) {
         display.drawLine(x + 5, y + 4, x + 9, y + 4);
         display.drawLine(x + 9, y + 4, x + 6, y + 7);
     } else {
-        // LiPo Battery Fill Level (0 to 3 bars)
+        // LiPo Battery Fill Level — calibrated to single-cell LiPo discharge curve
+        // 4.20V = 100%, 3.85V ≈ 60%, 3.70V ≈ 30%, 3.50V ≈ 5%, 3.30V = 0%
         int fillWidth = 0;
-        if (vbat >= 3.95F) fillWidth = 11;       // Full (3 bars)
-        else if (vbat >= 3.75F) fillWidth = 7;   // Medium (2 bars)
-        else if (vbat >= 3.55F) fillWidth = 4;   // Low (1 bar)
-        else fillWidth = 1;                      // Empty (0 bars)
+        if (vbat >= 3.85F) fillWidth = 11;       // Full  (>60%)
+        else if (vbat >= 3.70F) fillWidth = 7;   // Mid   (30-60%)
+        else if (vbat >= 3.50F) fillWidth = 4;   // Low   (5-30%)
+        else fillWidth = 1;                      // Critical (<5%)
 
         if (fillWidth > 0) {
             display.fillRect(x + 2, y + 2, fillWidth, 4);
@@ -496,36 +609,6 @@ String decimalToDMS(float val, bool isLat) {
     return String(buf);
 }
 
-// Calculate Haversine Distance between two GPS points (in meters)
-float calculateDistanceMeters(float lat1, float lon1, float lat2, float lon2) {
-    if (lat1 == 0.0F || lat2 == 0.0F) return 0.0F;
-    float R = 6371000.0F; // Earth radius in meters
-    float dLat = radians(lat2 - lat1);
-    float dLon = radians(lon2 - lon1);
-    float a = sin(dLat / 2.0F) * sin(dLat / 2.0F) +
-              cos(radians(lat1)) * cos(radians(lat2)) *
-              sin(dLon / 2.0F) * sin(dLon / 2.0F);
-    float c = 2.0F * atan2(sqrt(a), sqrt(1.0F - a));
-    return R * c;
-}
-
-// Calculate Initial Bearing / Compass Heading (0 to 360 deg)
-float calculateBearing(float lat1, float lon1, float lat2, float lon2) {
-    if (lat1 == 0.0F || lat2 == 0.0F) return 0.0F;
-    float y = sin(radians(lon2 - lon1)) * cos(radians(lat2));
-    float x = cos(radians(lat1)) * sin(radians(lat2)) -
-              sin(radians(lat1)) * cos(radians(lat2)) * cos(radians(lon2 - lon1));
-    float brng = degrees(atan2(y, x));
-    if (brng < 0.0F) brng += 360.0F;
-    return brng;
-}
-
-// Convert degrees (0-360) to 8-point Cardinal Direction
-const char* getCardinalDirection(float brng) {
-    const char* dirs[] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW", "N"};
-    int idx = (int)((brng + 22.5F) / 45.0F);
-    return dirs[idx % 8];
-}
 
 // Convert Latitude & Longitude to 3-Level CAP Cell Grid Identifier (e.g. 4086ABC)
 String getCapCellGrid(float lat, float lon) {
@@ -579,19 +662,13 @@ void renderScreen1() {
         display.drawString(0, 27, "Lat: " + decimalToDMS(beaconLat, true));
         display.drawString(0, 39, "Lon: " + decimalToDMS(beaconLon, false));
         
-        // Line 4: Distance & Compass Heading (calculated from base coordinates)
-        float distM = calculateDistanceMeters(34.0522F, -118.2437F, beaconLat, beaconLon);
-        float brng = calculateBearing(34.0522F, -118.2437F, beaconLat, beaconLon);
-
-        String distStr = (distM >= 1000.0F) ? (String(distM / 1000.0F, 2) + "km") : (String((int)distM) + "m");
-        String brngStr = String((int)brng) + "° " + String(getCardinalDirection(brng));
-
-        display.drawString(0, 51, "Dst: " + distStr + " | Hdg: " + brngStr);
+        // Line 4: Raw Coordinates
+        display.drawString(0, 51, "Raw: " + String(beaconLat, 5) + ", " + String(beaconLon, 5));
     } else {
         display.drawString(0, 15, "CAP: --");
         display.drawString(0, 27, "Lat: 0°00'00.0\"N");
         display.drawString(0, 39, "Lon: 0°00'00.0\"W");
-        display.drawString(0, 51, isLost ? "LINK LOST (STALE)" : "Dst: -- | Hdg: --");
+        display.drawString(0, 51, isLost ? "LINK LOST (STALE)" : "No GPS Fix");
     }
 }
 
@@ -701,10 +778,10 @@ extern bool longPressTriggeredGlob;
 
 void renderToastOverlay() {
     // 1. Live Hold Progress Bar (Renders at bottom of screen ONLY on Command Menu screen 2)
-    if (currentScreen == 2 && buttonWasPressedGlob && !longPressTriggeredGlob) {
-        uint32_t holdMs = millis() - buttonPressStartGlob;
+    if (currentScreen == 2 && buttonWasPressedGlob && !longPressTriggeredGlob && isrPressDownMs > 0) {
+        uint32_t holdMs = millis() - isrPressDownMs;
         if (holdMs > 150) {
-            int fillW = map(constrain((int)holdMs, 0, 1000), 0, 1000, 0, 104);
+            int fillW = map(constrain((int)holdMs, 0, 650), 0, 650, 0, 104);
             
             // Draw progress bar outline & fill (x=12, y=53, w=104, h=8)
             display.setColor(BLACK);
@@ -755,9 +832,16 @@ void setup() {
     delay(100);
 
     pinMode(PIN_BUTTON, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(PIN_BUTTON), onButtonIsr, CHANGE);
     Serial.begin(115200);
 
+    bleCommandQueue = xQueueCreate(4, BLE_CMD_MAX_LEN);
+
     txBatt = readTxBatteryVoltage();
+
+    Wire.begin(SDA_OLED, SCL_OLED);
+    Wire.setClock(100000); // 100kHz standard mode: maximum noise immunity on battery
+    Wire.setTimeOut(25);   // 25ms hardware timeout: prevents I2C bus hang from blocking CPU
 
     display.init();
     display.flipScreenVertically();
@@ -788,6 +872,10 @@ void setup() {
     pAdvertising->setScanResponse(true);
     pAdvertising->start();
 
+    // Hardware Task Watchdog (5-second timeout)
+    esp_task_wdt_init(5, true);
+    esp_task_wdt_add(NULL);
+
     int state = radio.begin(915.0, 125.0, 11, 8, 0x34, 22, 16, 1.6, false);
     if (state == RADIOLIB_ERR_NONE) {
         Serial.println("[Heltec V3 RadioLib] Init SUCCESS! (SF11 / CR8 / 16-Sym Preamble / 22dBm)");
@@ -807,50 +895,134 @@ uint32_t activeCommandStart = 0;
 int activeCommandRetries = 0;
 
 void loop() {
+    esp_task_wdt_reset(); // Feed the hardware watchdog: if the CPU ever hangs >5s, hardware auto-reboots
     handleButton();
 
-    // Transmit pending commands immediately
-    if (pendingCommandToSend.length() > 0) {
-        activeCommand = pendingCommandToSend;
-        pendingCommandToSend = "";
+    // --- TX Done / TX Timeout handler (runs first to free SPI bus ASAP) ---
+    if (txInProgress) {
+        if (txDoneFlag) {
+            txDoneFlag = false;
+            txInProgress = false;
+            rxFlag = false;
+            radio.finishTransmit();
+            int rxState = radio.startReceive();
+            if (rxState != RADIOLIB_ERR_NONE) {
+                recoverRadio();
+            }
+            Serial.println("[Heltec V3] TX Done (async)");
+        } else if (millis() - txStartMs > TX_TIMEOUT_MS) {
+            Serial.println("[Heltec V3] TX TIMEOUT -> recovering radio");
+            txInProgress = false;
+            txDoneFlag = false;
+            activeCommand = "";
+            lastTxStatus = "TX Timeout";
+            recoverRadio();
+        }
+        // While TX in progress, skip everything else to avoid SPI contention
+        // Still update OLED so display stays responsive
+        static uint32_t lastOledDuringTx = 0;
+        if (millis() - lastOledDuringTx > 100) {
+            lastOledDuringTx = millis();
+            updateOLED();
+        }
+        delay(5);
+        return;
+    }
+
+    // --- Serial command input (debug) ---
+    // NOTE: Must be non-blocking! On battery, the USB-UART bridge (CH9102) is
+    // unpowered and GPIO 44 (RX) floats, picking up noise that triggers
+    // Serial.available(). readStringUntil('\n') would block up to 1000ms.
+    {
+        static String serialAccum;
+        while (Serial.available()) {
+            char c = (char)Serial.read();
+            if (c == '\n' || c == '\r') {
+                serialAccum.trim();
+                if (serialAccum.length() > 0) {
+                    char cBuf[BLE_CMD_MAX_LEN];
+                    memset(cBuf, 0, sizeof(cBuf));
+                    if (serialAccum == "ARM_NOW") {
+                        snprintf(cBuf, sizeof(cBuf), "{\"cmd\":\"ARM_NOW\"}");
+                    } else if (serialAccum == "DISARM") {
+                        snprintf(cBuf, sizeof(cBuf), "{\"cmd\":\"DISARM\"}");
+                    } else if (serialAccum.startsWith("ARM_TIMER")) {
+                        uint32_t sec = 3600;
+                        int spaceIdx = serialAccum.indexOf(' ');
+                        if (spaceIdx > 0) sec = serialAccum.substring(spaceIdx + 1).toInt();
+                        snprintf(cBuf, sizeof(cBuf), "{\"cmd\":\"ARM_TIMER\",\"sec\":%u}", sec);
+                    } else {
+                        strncpy(cBuf, serialAccum.c_str(), sizeof(cBuf) - 1);
+                    }
+                    xQueueSend(bleCommandQueue, cBuf, 0);
+                }
+                serialAccum = "";
+            } else {
+                serialAccum += c;
+                if (serialAccum.length() > 128) serialAccum = ""; // overflow protection
+            }
+        }
+    }
+
+    // --- Send pending commands from BLE queue ---
+    bool sentNewCmd = false;
+    char cmdBuf[BLE_CMD_MAX_LEN];
+    while (xQueueReceive(bleCommandQueue, cmdBuf, 0) == pdTRUE) {
+        activeCommand = String(cmdBuf);
         activeCommandStart = millis();
         activeCommandRetries = 0;
-        
         lastTxStatus = activeCommand;
         transmitLoRaCommand(activeCommand);
+        sentNewCmd = true;
     }
-    // Asynchronous re-transmit if no telemetry ACK received within 450ms (accommodating SF11 airtime)
-    else if (activeCommand.length() > 0 && (millis() - activeCommandStart > 450)) {
+
+    // --- Non-blocking retry if no telemetry ACK received within 2500ms ---
+    if (!sentNewCmd && !txInProgress && activeCommand.length() > 0 &&
+        (millis() - activeCommandStart > 2500)) {
         activeCommandRetries++;
         if (activeCommandRetries <= 3) {
             activeCommandStart = millis();
             Serial.printf("[Heltec V3 Retry %d] Re-sending %s\n", activeCommandRetries, activeCommand.c_str());
             transmitLoRaCommand(activeCommand);
         } else {
-            activeCommand = ""; // Give up after 3 retries
+            activeCommand = "";
             lastTxStatus = "TX Timeout";
         }
     }
 
+    // --- LoRa RX (Hardware ISR Driven) ---
     if (rxFlag) {
         rxFlag = false;
-        uint8_t rxBuffer[64];
+        uint8_t rxBuffer[256];
         memset(rxBuffer, 0, sizeof(rxBuffer));
-        int state = radio.readData(rxBuffer, 0);
         size_t len = radio.getPacketLength();
-        radio.startReceive();
+        if (len > sizeof(rxBuffer)) len = sizeof(rxBuffer);
+        int state = radio.readData(rxBuffer, len);
+
+        int rxState = radio.startReceive();
+        if (rxState != RADIOLIB_ERR_NONE) {
+            recoverRadio();
+        }
 
         if (state == RADIOLIB_ERR_NONE && len > 0) {
-            activeCommand = ""; // Clear pending command retry upon receiving telemetry!
-            
-            // Check if binary telemetry packet
             if (len >= sizeof(LoRaTelemetryPacket) && rxBuffer[0] == MSG_TYPE_TELEMETRY) {
                 LoRaTelemetryPacket *telPkt = (LoRaTelemetryPacket*)rxBuffer;
+
+                if (activeCommand.length() > 0) {
+                    activeCommand = "";
+                    if (lastSentPacket.cmd == CMD_DISARM) {
+                        lastTxStatus = "DISARMED OK";
+                    } else if (lastSentPacket.cmd == CMD_ARM_NOW) {
+                        lastTxStatus = "ARMED OK";
+                    } else if (lastSentPacket.cmd == CMD_ARM_TIMER) {
+                        lastTxStatus = "TIMER SET OK";
+                    }
+                }
+
                 parseBinaryTelemetry(*telPkt);
                 Serial.printf("[Heltec V3 Binary RX] Seq: %u, State: %u, Batt: %u mV\n", telPkt->seq_num, telPkt->state, telPkt->batt_mv);
-            }
-            // Fallback for legacy JSON string
-            else if (rxBuffer[0] == '{') {
+            } else if (rxBuffer[0] == '{') {
+                activeCommand = "";
                 String str = "";
                 for (size_t i = 0; i < len; i++) str += (char)rxBuffer[i];
                 rawJson = str;
@@ -860,6 +1032,31 @@ void loop() {
         }
     }
 
-    updateOLED();
-    delay(20);
+    // --- OLED display update (Event-Driven + 1Hz periodic timer tick) ---
+    static uint32_t lastOledUpdate = 0;
+    static int lastScreen = -1;
+    static int lastMenuItem = -1;
+    static int lastHours = -1;
+    static uint32_t lastRxCount = 0;
+    static bool lastBtnState = false;
+
+    bool forceUpdate = false;
+    if (currentScreen != lastScreen || selectedMenuItem != lastMenuItem || selectedHours != lastHours || packetCount != lastRxCount || buttonWasPressedGlob != lastBtnState) {
+        forceUpdate = true;
+        lastScreen = currentScreen;
+        lastMenuItem = selectedMenuItem;
+        lastHours = selectedHours;
+        lastRxCount = packetCount;
+        lastBtnState = buttonWasPressedGlob;
+    }
+
+    // Refresh immediately on user interaction / packet rx, otherwise 1000ms (1Hz) to tick the seconds counter
+    uint32_t refreshInterval = (buttonWasPressedGlob || millis() < popupToastUntilMs) ? 50 : 1000;
+
+    if (forceUpdate || (millis() - lastOledUpdate >= refreshInterval)) {
+        updateOLED();
+        lastOledUpdate = millis();
+    }
+
+    delay(10);
 }

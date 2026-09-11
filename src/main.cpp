@@ -116,8 +116,8 @@ uint32_t armTimerDurationSec = 0;
 uint32_t remainingSeconds = 0;
 
 float batteryVoltage = 4.10;
-float lastLat = 0.0;
-float lastLon = 0.0;
+double lastLat = 0.0;
+double lastLon = 0.0;
 bool gpsFixValid = false;
 
 void ledSet(uint32_t hwPin, bool on) {
@@ -142,11 +142,17 @@ void updateHardwareOutputs() {
         // ARMED COUNTDOWN: MOSFET Gate LOW (Siren OFF), Blue LED slow pulse
         nrf_gpio_pin_clear(HW_MOSFET_TRIG_PIN);
         static uint32_t lastPulse = 0;
+        static uint32_t ledPulseStart = 0;
+        static bool ledPulseActive = false;
         if (millis() - lastPulse > 1000) {
             lastPulse = millis();
+            ledPulseActive = true;
+            ledPulseStart = millis();
             ledSet(HW_LED_BLUE, true);
-            delay(40);
+        }
+        if (ledPulseActive && millis() - ledPulseStart >= 40) {
             ledSet(HW_LED_BLUE, false);
+            ledPulseActive = false;
         }
     } else {
         // DISARMED: MOSFET Gate LOW, Blue LED OFF
@@ -232,7 +238,11 @@ void updateTimerState() {
 void onDio1();
 void broadcastBleTelemetry();
 extern volatile bool rxFlag;
+extern volatile bool txDoneFlag;
+extern volatile bool txInProgress;
+extern uint32_t txStartMs;
 void executeCommand(uint8_t cmdId, uint32_t param);
+void startAsyncTelemetryTx(const LoRaTelemetryPacket &pkt);
 
 void parseCommand(String jsonStr) {
     StaticJsonDocument<256> doc;
@@ -253,6 +263,11 @@ void parseCommand(String jsonStr) {
 }
 
 uint8_t txSequenceNumber = 0;
+
+// Shared state for deferred async ACK TX (set by executeCommand, consumed by loop)
+static LoRaTelemetryPacket pendingTxPkt;
+static bool pendingTxQueued = false;
+static uint32_t pendingAckAt = 0;
 
 void generateBinaryTelemetry(LoRaTelemetryPacket &pkt) {
     updateTimerState();
@@ -279,6 +294,25 @@ void generateBinaryTelemetry(LoRaTelemetryPacket &pkt) {
     pkt.lon_e7 = (int32_t)(lastLon * 1e7);
 }
 
+void recoverRadio() {
+    Serial.println("[RAK4631] Watchdog: Recovering SX1262 Radio...");
+    nrf_gpio_pin_clear(HW_LORA_RST); delay(20);
+    nrf_gpio_pin_set(HW_LORA_RST);   delay(100);
+
+    int state = radio.begin(915.0, 125.0, 11, 8, 0x34, 22, 16, 1.8, false);
+    if (state == RADIOLIB_ERR_NONE) {
+        radio.setDio2AsRfSwitch(true);
+        uint8_t sw[] = {0x34, 0x44};
+        radio.setSyncWord(sw, 2);
+        radio.autoLDRO();
+        radio.setDio1Action(onDio1);
+        radio.startReceive();
+        Serial.println("[RAK4631] Watchdog: Radio recovered successfully!");
+    } else {
+        Serial.printf("[RAK4631] Watchdog: Radio recovery failed (%d)\n", state);
+    }
+}
+
 void executeCommand(uint8_t cmdId, uint32_t param) {
     if (cmdId == CMD_DISARM) {
         currentState = DISARMED;
@@ -302,20 +336,17 @@ void executeCommand(uint8_t cmdId, uint32_t param) {
         Serial.printf("[RAK4631] Command Received: ARM_TIMER (%ds)\n", armTimerDurationSec);
     }
 
-    // Transmit immediate BLE telemetry update with 0ms delay if BLE connected
+    // Transmit immediate BLE telemetry update if BLE connected
     if (Bluefruit.connected()) {
         broadcastBleTelemetry();
     }
 
-    // Transmit immediate binary reply over LoRa for distant Heltec units
-    delay(50);
-    LoRaTelemetryPacket pkt;
-    generateBinaryTelemetry(pkt);
-    radio.clearDio1Action();
-    radio.transmit((uint8_t*)&pkt, sizeof(pkt));
-    rxFlag = false;
-    radio.setDio1Action(onDio1);
-    radio.startReceive();
+    // Queue non-blocking LoRa ACK reply (150ms turnaround for SF11 preamble settle)
+    // The startAsyncTelemetryTx call is deferred slightly so the remote's RX mode
+    // has time to settle after completing its own TX.
+    pendingAckAt = millis() + 150;
+    pendingTxQueued = true;
+    generateBinaryTelemetry(pendingTxPkt);
 }
 
 String generateTelemetry() {
@@ -362,36 +393,42 @@ void connect_callback(uint16_t conn_handle) {
 }
 
 String bleRxBufferRAK = "";
+volatile bool bleDataAvailable = false;
 
 void bleRxCallback(uint16_t conn_handle) {
     (void) conn_handle;
-    while (bleuart.available()) {
-        char c = (char) bleuart.read();
-        bleRxBufferRAK += c;
-    }
-
-    // Strip leading non-JSON characters
-    int firstBrace = bleRxBufferRAK.indexOf('{');
-    if (firstBrace > 0) {
-        bleRxBufferRAK = bleRxBufferRAK.substring(firstBrace);
-        firstBrace = 0;
-    } else if (firstBrace < 0 && bleRxBufferRAK.length() > 0) {
-        bleRxBufferRAK = "";
-    }
-
-    int lastBrace = bleRxBufferRAK.lastIndexOf('}');
-    if (firstBrace == 0 && lastBrace > 0) {
-        String input = bleRxBufferRAK.substring(0, lastBrace + 1);
-        bleRxBufferRAK = bleRxBufferRAK.substring(lastBrace + 1);
-        Serial.println("[BLE RAK4631 RX] Direct Command: " + input);
-        parseCommand(input);
-    } else if (bleRxBufferRAK.length() > 256) {
-        bleRxBufferRAK = "";
-    }
+    bleDataAvailable = true;
 }
 
 volatile bool rxFlag = false;
-void onDio1() { rxFlag = true; }
+volatile bool txDoneFlag = false;
+volatile bool txInProgress = false;
+uint32_t txStartMs = 0;
+#define TX_TIMEOUT_MS 2000  // If TX takes longer than 2s, the radio has locked up
+
+void onDio1() {
+    if (txInProgress) {
+        txDoneFlag = true;
+    } else {
+        rxFlag = true;
+    }
+}
+
+// Non-blocking start of a LoRa transmission. Sets txInProgress = true.
+// The loop() polls txDoneFlag (set by onDio1 ISR) and txStartMs for timeout.
+void startAsyncTelemetryTx(const LoRaTelemetryPacket &pkt) {
+    txInProgress = true;
+    txDoneFlag = false;
+    txStartMs = millis();
+    radio.clearDio1Action();
+    int res = radio.startTransmit((uint8_t*)&pkt, sizeof(pkt));
+    radio.setDio1Action(onDio1);
+    if (res != RADIOLIB_ERR_NONE) {
+        Serial.printf("[RAK4631] startTransmit failed: %d -> recovering\n", res);
+        txInProgress = false;
+        recoverRadio();
+    }
+}
 
 void setup() {
     nrf_gpio_cfg_output(HW_LED_GREEN); ledSet(HW_LED_GREEN, false);
@@ -452,27 +489,144 @@ void setup() {
 }
 
 void loop() {
+    updateTimerState();
+    updateHardwareOutputs();
+
+    // --- TX Done / TX Timeout handler ---
+    if (txInProgress) {
+        if (txDoneFlag) {
+            // TX completed successfully via DIO1 IRQ
+            txDoneFlag = false;
+            txInProgress = false;
+            rxFlag = false;
+            radio.finishTransmit();
+            int rxState = radio.startReceive();
+            if (rxState != RADIOLIB_ERR_NONE) {
+                recoverRadio();
+            }
+            ledSet(HW_LED_GREEN, false);
+            if (Bluefruit.connected()) {
+                broadcastBleTelemetry();
+            }
+            Serial.println("[RAK4631] TX Done (async)");
+        } else if (millis() - txStartMs > TX_TIMEOUT_MS) {
+            // TX hung — radio is locked up, recover it
+            Serial.println("[RAK4631] TX TIMEOUT -> recovering radio");
+            txInProgress = false;
+            txDoneFlag = false;
+            recoverRadio();
+            ledSet(HW_LED_GREEN, false);
+        }
+        // While TX is in progress, skip RX and BLE processing to avoid SPI contention
+        return;
+    }
+
+    // --- Deferred ACK TX from executeCommand ---
+    if (pendingTxQueued && millis() >= pendingAckAt) {
+        pendingTxQueued = false;
+        ledSet(HW_LED_GREEN, true);
+        startAsyncTelemetryTx(pendingTxPkt);
+        return;
+    }
+
+    // --- BLE RX ---
+    if (bleDataAvailable || bleuart.available()) {
+        bleDataAvailable = false;
+        while (bleuart.available()) {
+            char c = (char) bleuart.read();
+            bleRxBufferRAK += c;
+        }
+
+        while (true) {
+            int firstBrace = bleRxBufferRAK.indexOf('{');
+            if (firstBrace > 0) {
+                bleRxBufferRAK = bleRxBufferRAK.substring(firstBrace);
+                firstBrace = 0;
+            } else if (firstBrace < 0) {
+                if (bleRxBufferRAK.length() > 0) bleRxBufferRAK = "";
+                break;
+            }
+
+            int openCount = 0;
+            int endIdx = -1;
+            for (unsigned int i = 0; i < bleRxBufferRAK.length(); i++) {
+                if (bleRxBufferRAK[i] == '{') openCount++;
+                else if (bleRxBufferRAK[i] == '}') {
+                    openCount--;
+                    if (openCount == 0) {
+                        endIdx = i;
+                        break;
+                    }
+                }
+            }
+
+            if (endIdx > 0) {
+                String input = bleRxBufferRAK.substring(0, endIdx + 1);
+                bleRxBufferRAK = bleRxBufferRAK.substring(endIdx + 1);
+                Serial.println("[BLE RAK4631 RX] Executing Command: " + input);
+                parseCommand(input);
+            } else {
+                if (bleRxBufferRAK.length() > 256) {
+                    bleRxBufferRAK = "";
+                }
+                break;
+            }
+        }
+    }
+
+    // --- IRQ safety net: poll SX1262 IRQ register every 500ms ---
+    static uint32_t lastIrqCheck = 0;
+    if (millis() - lastIrqCheck > 500) {
+        lastIrqCheck = millis();
+        uint16_t irq = radio.getIrqFlags();
+        if (irq & RADIOLIB_SX126X_IRQ_RX_DONE) {
+            rxFlag = true;
+        } else if (irq & (RADIOLIB_SX126X_IRQ_CRC_ERR | RADIOLIB_SX126X_IRQ_HEADER_ERR | RADIOLIB_SX126X_IRQ_TIMEOUT)) {
+            radio.finishReceive();
+            radio.startReceive();
+        }
+    }
+
+    // --- Serial command input (debug) ---
+    if (Serial.available()) {
+        String sCmd = Serial.readStringUntil('\n');
+        sCmd.trim();
+        if (sCmd == "ARM_NOW") {
+            executeCommand(CMD_ARM_NOW, 0);
+        } else if (sCmd == "DISARM") {
+            executeCommand(CMD_DISARM, 0);
+        } else if (sCmd.startsWith("ARM_TIMER")) {
+            uint32_t sec = 3600;
+            int spaceIdx = sCmd.indexOf(' ');
+            if (spaceIdx > 0) sec = sCmd.substring(spaceIdx + 1).toInt();
+            executeCommand(CMD_ARM_TIMER, sec);
+        }
+    }
+
+    // --- LoRa RX ---
     if (rxFlag) {
         rxFlag = false;
-        uint8_t rxBuffer[64];
+        uint8_t rxBuffer[256];
         memset(rxBuffer, 0, sizeof(rxBuffer));
-        int state = radio.readData(rxBuffer, 0);
         size_t len = radio.getPacketLength();
-        
-        // Always re-arm DIO1 and restart reception
-        radio.clearDio1Action();
-        radio.setDio1Action(onDio1);
-        radio.startReceive();
+        if (len > sizeof(rxBuffer)) len = sizeof(rxBuffer);
+        int state = radio.readData(rxBuffer, len);
+        float rssi = radio.getRSSI();
+        float snr = radio.getSNR();
+
+        int rxState = radio.startReceive();
+        if (rxState != RADIOLIB_ERR_NONE) {
+            recoverRadio();
+        }
+
+        Serial.printf("[RAK4631 LoRa RX] State: %d, Len: %d, RSSI: %.1f dBm, SNR: %.1f dB\n", state, len, rssi, snr);
 
         if (state == RADIOLIB_ERR_NONE && len > 0) {
-            // Check if binary command packet
             if (len >= sizeof(LoRaCommandPacket) && rxBuffer[0] == MSG_TYPE_COMMAND) {
                 LoRaCommandPacket *cmdPkt = (LoRaCommandPacket*)rxBuffer;
                 Serial.printf("[RX Binary Cmd] Type: 0x%02X, Cmd: 0x%02X, Param: %u\n", cmdPkt->msg_type, cmdPkt->cmd, cmdPkt->param);
                 executeCommand(cmdPkt->cmd, cmdPkt->param);
-            }
-            // Fallback for legacy JSON string
-            else if (rxBuffer[0] == '{') {
+            } else if (rxBuffer[0] == '{') {
                 String str = "";
                 for (size_t i = 0; i < len; i++) str += (char)rxBuffer[i];
                 Serial.println("[RX JSON Cmd] " + str);
@@ -481,31 +635,15 @@ void loop() {
         }
     }
 
+    // --- Periodic telemetry TX every 10s ---
     static uint32_t lastTx = 0;
     if (millis() - lastTx > 10000) {
         lastTx = millis();
         ledSet(HW_LED_GREEN, true);
-
-        // Transmit compact 20-byte binary telemetry over LoRa
         LoRaTelemetryPacket pkt;
         generateBinaryTelemetry(pkt);
-        radio.clearDio1Action();
-        int txState = radio.transmit((uint8_t*)&pkt, sizeof(pkt));
-        rxFlag = false;
-        radio.setDio1Action(onDio1);
-        radio.startReceive();
-        delay(40);
-        ledSet(HW_LED_GREEN, false);
-
-        if (Bluefruit.connected()) {
-            broadcastBleTelemetry();
-        }
-
-        if (txState == RADIOLIB_ERR_NONE) {
-            Serial.printf("[TX Binary Telemetry] 20 Bytes Sent | Seq: %u, State: %u, Batt: %u mV\n", pkt.seq_num, pkt.state, pkt.batt_mv);
-        } else {
-            Serial.printf("[TX FAIL] %d\n", txState);
-        }
+        startAsyncTelemetryTx(pkt);
+        Serial.printf("[RAK4631] Queued async TX | Seq: %u, State: %u, Batt: %u mV\n", pkt.seq_num, pkt.state, pkt.batt_mv);
     }
 
     delay(10);

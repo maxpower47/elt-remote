@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lora-beacon-pwa-v1.3.9';
+const CACHE_NAME = 'lora-beacon-pwa-v1.4.0';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -27,7 +27,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((cache) => {
-          if (cache !== CACHE_NAME) {
+          if (cache !== CACHE_NAME && cache !== 'leaflet-tiles-v1') {
             console.log('[PWA SW] Deleting old cache:', cache);
             return caches.delete(cache);
           }
@@ -48,7 +48,7 @@ self.addEventListener('fetch', (event) => {
         // Dynamically cache Leaflet tiles or assets if fetched online
         if (event.request.url.includes('leaflet') || event.request.url.includes('tile.openstreetmap.org')) {
           const responseToCache = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
+          caches.open('leaflet-tiles-v1').then((cache) => {
             cache.put(event.request, responseToCache);
           });
         }

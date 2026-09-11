@@ -310,7 +310,7 @@
     <header>
         <div class="header-title">
             <h1>📡 Practice Beacon Remote</h1>
-            <span class="version-badge">v1.3.9</span>
+            <span class="version-badge">v1.4.0</span>
             <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
         </div>
         <button id="btnConnectBle" class="btn btn-connect" onclick="toggleWebBluetooth()">📲 Connect</button>
@@ -400,6 +400,7 @@
         <!-- Map Container (Right in Desktop, Bottom in Mobile) -->
         <div class="map-wrapper">
             <div id="map"></div>
+            <button id='followToggle' onclick='followBeacon = !followBeacon; this.textContent = followBeacon ? "📍 Following" : "🔓 Free"' style="position:absolute; top:10px; right:10px; z-index:1000; padding:6px 12px; border-radius:8px; border:1px solid #334155; background:#1e293b; color:white; font-size:0.85rem; cursor:pointer;">📍 Following</button>
         </div>
     </div>
 
@@ -418,6 +419,7 @@
 
         // Initialize Map with explicit container sizing
         let map, marker;
+        let followBeacon = true;
         function initMap() {
             map = L.map('map').setView([34.0522, -118.2437], 13);
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -447,8 +449,13 @@
 
         function logConsole(msg) {
             const el = document.getElementById('consoleLog');
-            const timeStr = new Date().toLocaleTimeString();
-            el.innerHTML = `[${timeStr}] ${msg}<br>` + el.innerHTML;
+            const line = document.createElement('div');
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString();
+            line.textContent = `[${timeStr}] ${msg}`;
+            el.prepend(line);
+            // Limit console lines
+            while (el.children.length > 200) el.removeChild(el.lastChild);
         }
 
         function formatTime(totalSec) {
@@ -565,8 +572,12 @@
         }
 
         let bleRxBuffer = "";
+        let lastBleChunkTime = 0;
 
         function handleBleNotification(event) {
+            if (Date.now() - lastBleChunkTime > 2000 && bleRxBuffer.length > 0) { bleRxBuffer = ''; }
+            lastBleChunkTime = Date.now();
+
             const value = event.target.value;
             const decoder = new TextDecoder('utf-8');
             const str = decoder.decode(value);
@@ -732,7 +743,7 @@
                         if (marker && map) {
                             const pos = [latVal, lonVal];
                             marker.setLatLng(pos);
-                            map.panTo(pos);
+                            if (followBeacon) map.panTo(pos);
                         }
                     } else {
                         gpsFix.innerText = "NO FIX";
@@ -775,7 +786,7 @@
 
         // Calculate Distance in meters between two lat/lon pairs
         function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
-            if (!lat1 || !lat2 || lat1 === 0 || lat2 === 0) return null;
+            if (lat1 == null || lat2 == null || lon1 == null || lon2 == null) return null;
             const R = 6371000;
             const rad = Math.PI / 180;
             const dLat = (lat2 - lat1) * rad;
@@ -789,7 +800,7 @@
 
         // Calculate Compass Heading / Bearing in degrees & cardinal
         function calculateBearing(lat1, lon1, lat2, lon2) {
-            if (!lat1 || !lat2 || lat1 === 0 || lat2 === 0) return null;
+            if (lat1 == null || lat2 == null || lon1 == null || lon2 == null) return null;
             const rad = Math.PI / 180;
             const y = Math.sin((lon2 - lon1) * rad) * Math.cos(lat2 * rad);
             const x = Math.cos(lat1 * rad) * Math.sin(lat2 * rad) -
@@ -811,7 +822,10 @@
                     userLon = pos.coords.longitude;
                     updateRelativeLocation();
                 },
-                (err) => {},
+                (err) => {
+                    console.warn('Geolocation error:', err.message);
+                    logConsole('GPS: ' + err.message);
+                },
                 { enableHighAccuracy: true }
             );
         }
@@ -833,6 +847,9 @@
             }
         }
 
+        let pendingCommandName = null;
+        let pendingCommandExpiry = null;
+
         async function sendCmd(cmdName, params = {}) {
             if (!rxCharacteristic) {
                 alert("Please click 'Connect BLE' first!");
@@ -846,12 +863,19 @@
                 const encoder = new TextEncoder();
                 const data = encoder.encode(payloadStr);
                 
-                if (rxCharacteristic.writeValueWithoutResponse) {
-                    await rxCharacteristic.writeValueWithoutResponse(data);
-                } else if (rxCharacteristic.writeValueWithResponse) {
-                    await rxCharacteristic.writeValueWithResponse(data);
-                } else {
-                    await rxCharacteristic.writeValue(data);
+                const CHUNK_SIZE = 20;
+                for (let i = 0; i < data.length; i += CHUNK_SIZE) {
+                    const chunk = data.slice(i, i + CHUNK_SIZE);
+                    if (rxCharacteristic.writeValueWithoutResponse) {
+                        await rxCharacteristic.writeValueWithoutResponse(chunk);
+                    } else if (rxCharacteristic.writeValueWithResponse) {
+                        await rxCharacteristic.writeValueWithResponse(chunk);
+                    } else {
+                        await rxCharacteristic.writeValue(chunk);
+                    }
+                    if (i + CHUNK_SIZE < data.length) {
+                        await new Promise(r => setTimeout(r, 30));
+                    }
                 }
 
                 // Optimistic UI state update
@@ -886,6 +910,16 @@
             if (lastRxTimestamp > 0 && (Date.now() - lastRxTimestamp > 30000)) {
                 document.getElementById('badgeState').className = "status-badge LOST_LINK";
                 document.getElementById('badgeState').innerText = "LOST LINK";
+            }
+            if (pendingCommandExpiry && Date.now() > pendingCommandExpiry) {
+                pendingCommandExpiry = null;
+                // Revert UI to actual beacon state
+                updateControlButtonsState(currentBeaconState);
+                const badge = document.getElementById('badgeState');
+                if (badge) {
+                    badge.className = 'status-badge ' + currentBeaconState;
+                    badge.innerText = currentBeaconState;
+                }
             }
         }, 1000);
 
