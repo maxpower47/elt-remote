@@ -55,14 +55,15 @@
       int32_t  lon_e7;        // Longitude * 1e7
   } LoRaTelemetryPacket;
   ```
-- **Control Command Packet (`0x02`)** — **8 Bytes Total**:
+- **Control Command Packet (`0x02`)** — **12 Bytes Total**:
   ```c
   typedef struct {
       uint8_t  msg_type;      // 0x02 (MSG_TYPE_COMMAND)
       uint8_t  seq_num;       // Rolling sequence number
       uint8_t  cmd;           // 0x01=DISARM, 0x02=ARM_NOW, 0x03=ARM_TIMER
       uint8_t  reserved;      // 0x00 padding
-      uint32_t param;         // Countdown seconds (if CMD_ARM_TIMER)
+      uint32_t delay_sec;     // Countdown seconds before activating (0 = immediate)
+      uint32_t runtime_sec;   // Seconds to stay active before auto-disarming (0 = run indefinite)
   } LoRaCommandPacket;
   ```
 

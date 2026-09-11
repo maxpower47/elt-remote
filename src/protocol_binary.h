@@ -36,13 +36,14 @@ typedef struct {
     int32_t  lon_e7;        // Longitude * 1e7
 } LoRaTelemetryPacket;
 
-// Compact 8-Byte Over-the-Air Control Command Packet
+// Compact 12-Byte Over-the-Air Control Command Packet
 typedef struct {
     uint8_t  msg_type;      // 0x02 (MSG_TYPE_COMMAND)
     uint8_t  seq_num;       // Rolling sequence number
     uint8_t  cmd;           // CMD_DISARM, CMD_ARM_NOW, CMD_ARM_TIMER
     uint8_t  reserved;      // 0x00 padding
-    uint32_t param;         // Countdown seconds (if CMD_ARM_TIMER)
+    uint32_t delay_sec;     // Countdown seconds before activating (0 = immediate)
+    uint32_t runtime_sec;   // Seconds to stay active before auto-disarming (0 = run indefinite)
 } LoRaCommandPacket;
 
 #pragma pack(pop)

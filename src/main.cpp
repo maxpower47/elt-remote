@@ -34,6 +34,8 @@ struct BeaconNVMData {
     uint8_t state;
     uint32_t timerDurationSec;
     uint32_t remainingSecAtSave;
+    uint32_t runDurationSec;
+    uint32_t remainingRunSecAtSave;
     uint32_t magic;
 };
 #define NVM_MAGIC 0xDEADBEEF
@@ -113,6 +115,8 @@ SystemState currentState = DISARMED;
 
 uint32_t armTimerStartMs = 0;
 uint32_t armTimerDurationSec = 0;
+uint32_t runTimerStartMs = 0;
+uint32_t runTimerDurationSec = 0;
 uint32_t remainingSeconds = 0;
 
 float batteryVoltage = 4.10;
@@ -167,7 +171,9 @@ void saveStateToNVM() {
         BeaconNVMData nvm;
         nvm.state = (uint8_t)currentState;
         nvm.timerDurationSec = armTimerDurationSec;
-        nvm.remainingSecAtSave = remainingSeconds;
+        nvm.remainingSecAtSave = (currentState == ARMED_TIMER) ? remainingSeconds : 0;
+        nvm.runDurationSec = runTimerDurationSec;
+        nvm.remainingRunSecAtSave = (currentState == ACTIVE && runTimerDurationSec > 0) ? remainingSeconds : 0;
         nvm.magic = NVM_MAGIC;
         
         file.seek(0);
@@ -186,13 +192,23 @@ void loadStateFromNVM() {
             if (nvm.magic == NVM_MAGIC) {
                 currentState = (SystemState)nvm.state;
                 armTimerDurationSec = nvm.timerDurationSec;
-                remainingSeconds = nvm.remainingSecAtSave;
+                runTimerDurationSec = nvm.runDurationSec;
                 
                 if (currentState == ARMED_TIMER) {
                     armTimerStartMs = millis();
-                    armTimerDurationSec = remainingSeconds;
+                    armTimerDurationSec = nvm.remainingSecAtSave > 0 ? nvm.remainingSecAtSave : armTimerDurationSec;
+                    remainingSeconds = armTimerDurationSec;
                 } else if (currentState == ACTIVE) {
+                    if (runTimerDurationSec > 0) {
+                        runTimerStartMs = millis();
+                        runTimerDurationSec = nvm.remainingRunSecAtSave > 0 ? nvm.remainingRunSecAtSave : runTimerDurationSec;
+                        remainingSeconds = runTimerDurationSec;
+                    } else {
+                        remainingSeconds = 0;
+                    }
                     updateHardwareOutputs();
+                } else {
+                    remainingSeconds = 0;
                 }
             }
         }
@@ -224,12 +240,36 @@ void updateTimerState() {
     if (currentState == ARMED_TIMER) {
         uint32_t elapsedSec = (millis() - armTimerStartMs) / 1000;
         if (elapsedSec >= armTimerDurationSec) {
-            remainingSeconds = 0;
-            currentState = ACTIVE; // Timer expired -> Trigger MOSFET & Alarm
+            // Delay expired -> Transition to ACTIVE
+            currentState = ACTIVE;
+            if (runTimerDurationSec > 0) {
+                runTimerStartMs = millis();
+                remainingSeconds = runTimerDurationSec;
+            } else {
+                remainingSeconds = 0;
+            }
             saveStateToNVM();
         } else {
             remainingSeconds = armTimerDurationSec - elapsedSec;
         }
+    } else if (currentState == ACTIVE) {
+        if (runTimerDurationSec > 0) {
+            uint32_t elapsedSec = (millis() - runTimerStartMs) / 1000;
+            if (elapsedSec >= runTimerDurationSec) {
+                // Run time expired -> Auto-disarm
+                currentState = DISARMED;
+                remainingSeconds = 0;
+                runTimerDurationSec = 0;
+                saveStateToNVM();
+                Serial.println("[RAK4631] Run Timer Expired -> Auto-DISARM");
+            } else {
+                remainingSeconds = runTimerDurationSec - elapsedSec;
+            }
+        } else {
+            remainingSeconds = 0;
+        }
+    } else {
+        remainingSeconds = 0;
     }
 
     updateHardwareOutputs();
@@ -241,7 +281,7 @@ extern volatile bool rxFlag;
 extern volatile bool txDoneFlag;
 extern volatile bool txInProgress;
 extern uint32_t txStartMs;
-void executeCommand(uint8_t cmdId, uint32_t param);
+void executeCommand(uint8_t cmdId, uint32_t delaySec, uint32_t runSec);
 void startAsyncTelemetryTx(const LoRaTelemetryPacket &pkt);
 
 void parseCommand(String jsonStr) {
@@ -252,12 +292,14 @@ void parseCommand(String jsonStr) {
     if (doc.containsKey("cmd")) {
         String cmd = doc["cmd"].as<String>();
         if (cmd == "DISARM") {
-            executeCommand(CMD_DISARM, 0);
+            executeCommand(CMD_DISARM, 0, 0);
         } else if (cmd == "ARM_NOW") {
-            executeCommand(CMD_ARM_NOW, 0);
+            uint32_t runSec = doc["run_sec"] | 0;
+            executeCommand(CMD_ARM_NOW, 0, runSec);
         } else if (cmd == "ARM_TIMER") {
-            uint32_t sec = doc["sec"] | 3600;
-            executeCommand(CMD_ARM_TIMER, sec);
+            uint32_t delaySec = doc["delay_sec"] | doc["sec"] | 0;
+            uint32_t runSec = doc["run_sec"] | 0;
+            executeCommand(CMD_ARM_TIMER, delaySec, runSec);
         }
     }
 }
@@ -313,27 +355,51 @@ void recoverRadio() {
     }
 }
 
-void executeCommand(uint8_t cmdId, uint32_t param) {
+void executeCommand(uint8_t cmdId, uint32_t delaySec, uint32_t runSec) {
     if (cmdId == CMD_DISARM) {
         currentState = DISARMED;
         remainingSeconds = 0;
+        armTimerDurationSec = 0;
+        runTimerDurationSec = 0;
         updateHardwareOutputs();
         saveStateToNVM();
         Serial.println("[RAK4631] Command Received: DISARM (MOSFET OFF)");
     } else if (cmdId == CMD_ARM_NOW) {
         currentState = ACTIVE;
-        remainingSeconds = 0;
+        armTimerDurationSec = 0;
+        runTimerDurationSec = runSec;
+        if (runTimerDurationSec > 0) {
+            runTimerStartMs = millis();
+            remainingSeconds = runTimerDurationSec;
+            Serial.printf("[RAK4631] Command Received: ARM_NOW with %ds runtime\n", runTimerDurationSec);
+        } else {
+            remainingSeconds = 0;
+            Serial.println("[RAK4631] Command Received: ARM_NOW (indefinite)");
+        }
         updateHardwareOutputs();
         saveStateToNVM();
-        Serial.println("[RAK4631] Command Received: ARM_NOW (MOSFET ON)");
     } else if (cmdId == CMD_ARM_TIMER) {
-        currentState = ARMED_TIMER;
-        armTimerDurationSec = param > 0 ? param : 3600;
-        armTimerStartMs = millis();
-        remainingSeconds = armTimerDurationSec;
+        runTimerDurationSec = runSec;
+        if (delaySec > 0) {
+            currentState = ARMED_TIMER;
+            armTimerDurationSec = delaySec;
+            armTimerStartMs = millis();
+            remainingSeconds = armTimerDurationSec;
+            Serial.printf("[RAK4631] Command Received: ARM_TIMER (delay: %ds, run: %ds)\n", armTimerDurationSec, runTimerDurationSec);
+        } else {
+            // Delay is 0 -> Arm immediately with the specified run duration!
+            currentState = ACTIVE;
+            armTimerDurationSec = 0;
+            if (runTimerDurationSec > 0) {
+                runTimerStartMs = millis();
+                remainingSeconds = runTimerDurationSec;
+            } else {
+                remainingSeconds = 0;
+            }
+            Serial.printf("[RAK4631] Command Received: ARM_TIMER (immediate run: %ds)\n", runTimerDurationSec);
+        }
         updateHardwareOutputs();
         saveStateToNVM();
-        Serial.printf("[RAK4631] Command Received: ARM_TIMER (%ds)\n", armTimerDurationSec);
     }
 
     // Transmit immediate BLE telemetry update if BLE connected
@@ -592,14 +658,24 @@ void loop() {
         String sCmd = Serial.readStringUntil('\n');
         sCmd.trim();
         if (sCmd == "ARM_NOW") {
-            executeCommand(CMD_ARM_NOW, 0);
+            executeCommand(CMD_ARM_NOW, 0, 0);
         } else if (sCmd == "DISARM") {
-            executeCommand(CMD_DISARM, 0);
+            executeCommand(CMD_DISARM, 0, 0);
         } else if (sCmd.startsWith("ARM_TIMER")) {
-            uint32_t sec = 3600;
+            uint32_t delaySec = 3600;
+            uint32_t runSec = 0;
             int spaceIdx = sCmd.indexOf(' ');
-            if (spaceIdx > 0) sec = sCmd.substring(spaceIdx + 1).toInt();
-            executeCommand(CMD_ARM_TIMER, sec);
+            if (spaceIdx > 0) {
+                String rest = sCmd.substring(spaceIdx + 1);
+                int space2 = rest.indexOf(' ');
+                if (space2 > 0) {
+                    delaySec = rest.substring(0, space2).toInt();
+                    runSec = rest.substring(space2 + 1).toInt();
+                } else {
+                    delaySec = rest.toInt();
+                }
+            }
+            executeCommand(CMD_ARM_TIMER, delaySec, runSec);
         }
     }
 
@@ -624,8 +700,8 @@ void loop() {
         if (state == RADIOLIB_ERR_NONE && len > 0) {
             if (len >= sizeof(LoRaCommandPacket) && rxBuffer[0] == MSG_TYPE_COMMAND) {
                 LoRaCommandPacket *cmdPkt = (LoRaCommandPacket*)rxBuffer;
-                Serial.printf("[RX Binary Cmd] Type: 0x%02X, Cmd: 0x%02X, Param: %u\n", cmdPkt->msg_type, cmdPkt->cmd, cmdPkt->param);
-                executeCommand(cmdPkt->cmd, cmdPkt->param);
+                Serial.printf("[RX Binary Cmd] Type: 0x%02X, Cmd: 0x%02X, Delay: %u, Run: %u\n", cmdPkt->msg_type, cmdPkt->cmd, cmdPkt->delay_sec, cmdPkt->runtime_sec);
+                executeCommand(cmdPkt->cmd, cmdPkt->delay_sec, cmdPkt->runtime_sec);
             } else if (rxBuffer[0] == '{') {
                 String str = "";
                 for (size_t i = 0; i < len; i++) str += (char)rxBuffer[i];

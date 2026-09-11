@@ -310,7 +310,7 @@
     <header>
         <div class="header-title">
             <h1>📡 Practice Beacon Remote</h1>
-            <span class="version-badge">v1.4.0</span>
+            <span class="version-badge">v1.4.2</span>
             <div id="badgeState" class="status-badge DISARMED">DISARMED</div>
         </div>
         <button id="btnConnectBle" class="btn btn-connect" onclick="toggleWebBluetooth()">📲 Connect</button>
@@ -332,15 +332,25 @@
             <div class="card">
                 <div class="card-title">Remote Control Panel</div>
                 <div class="btn-group">
-                    <button id="btnArmNow" class="btn btn-danger" onclick="sendCmd('ARM_NOW')">⚡ ARM IMMEDIATELY</button>
+                    <button id="btnArmNow" class="btn btn-danger" onclick="sendArmNow()">⚡ ARM IMMEDIATELY</button>
                     <button id="btnDisarm" class="btn btn-success" onclick="sendCmd('DISARM')">🛡️ DISARM BEACON</button>
                     
-                    <div style="margin-top: 6px;">
-                        <div class="stat-label" style="margin-bottom: 4px;">ARM WITH TIMER (HOURS)</div>
-                        <div class="timer-input-group">
-                            <input type="number" id="inputHours" value="1" min="1" max="72" inputmode="numeric">
-                            <button id="btnStartTimer" class="btn btn-warning" style="flex: 1;" onclick="sendArmTimer()">⏱️ START TIMER</button>
+                    <div style="margin-top: 6px; display: flex; flex-direction: column; gap: 8px;">
+                        <div>
+                            <div class="stat-label" style="margin-bottom: 2px;">ARM DELAY (HOURS, 0 = IMMEDIATE)</div>
+                            <div class="timer-input-group">
+                                <input type="number" id="inputDelayHours" value="1" min="0" max="72" inputmode="numeric">
+                                <span style="font-size: 0.8rem; color: var(--text-muted); align-self: center;">hrs before siren</span>
+                            </div>
                         </div>
+                        <div>
+                            <div class="stat-label" style="margin-bottom: 2px;">RUN DURATION (HOURS, 0 = INDEFINITE)</div>
+                            <div class="timer-input-group">
+                                <input type="number" id="inputRunHours" value="0" min="0" max="72" inputmode="numeric">
+                                <span style="font-size: 0.8rem; color: var(--text-muted); align-self: center;">hrs active until disarm</span>
+                            </div>
+                        </div>
+                        <button id="btnStartTimer" class="btn btn-warning" style="width: 100%; margin-top: 2px;" onclick="sendArmTimer()">⏱️ ARM WITH TIMER(S)</button>
                     </div>
                 </div>
             </div>
@@ -528,7 +538,8 @@
             const btnArmNow = document.getElementById('btnArmNow');
             const btnDisarm = document.getElementById('btnDisarm');
             const btnStartTimer = document.getElementById('btnStartTimer');
-            const inputHours = document.getElementById('inputHours');
+            const inputDelayHours = document.getElementById('inputDelayHours');
+            const inputRunHours = document.getElementById('inputRunHours');
 
             const isConnected = (bleDevice && bleDevice.gatt && bleDevice.gatt.connected);
 
@@ -536,12 +547,14 @@
                 btnArmNow.disabled = true;
                 btnDisarm.disabled = true;
                 btnStartTimer.disabled = true;
-                inputHours.disabled = true;
+                if (inputDelayHours) inputDelayHours.disabled = true;
+                if (inputRunHours) inputRunHours.disabled = true;
                 return;
             }
 
             // Connected: Enable controls
-            inputHours.disabled = false;
+            if (inputDelayHours) inputDelayHours.disabled = false;
+            if (inputRunHours) inputRunHours.disabled = false;
             btnStartTimer.disabled = false;
 
             const cleanState = currentBeaconState;
@@ -665,6 +678,17 @@
             return `${base}${q1}${q2}${q3}`;
         }
 
+        function getFriendlyState(state) {
+            if (!state) return "SEARCHING...";
+            const s = String(state).trim().toUpperCase();
+            if (s === "ARMED_TIMER") return "ARMED (TIMER)";
+            if (s === "ACTIVE")      return "ACTIVE (ALARM)";
+            if (s === "DISARMED")    return "DISARMED";
+            if (s === "LOST_LINK")   return "LOST LINK";
+            if (s === "DISCONNECTED") return "DISCONNECTED";
+            return s.replace(/_/g, " ");
+        }
+
         function updateDashboard(data) {
             if (!data || typeof data !== 'object') return;
             lastRxTimestamp = Date.now();
@@ -676,7 +700,7 @@
                 const badge = document.getElementById('badgeState');
                 if (badge) {
                     badge.className = 'status-badge ' + cleanState;
-                    badge.innerText = cleanState;
+                    badge.innerText = getFriendlyState(cleanState);
                 }
                 updateControlButtonsState(cleanState);
             }
@@ -900,10 +924,18 @@
             }
         }
 
+        function sendArmNow() {
+            const runHrs = parseInt(document.getElementById('inputRunHours')?.value) || 0;
+            const runSec = runHrs * 3600;
+            sendCmd('ARM_NOW', { run_sec: runSec });
+        }
+
         function sendArmTimer() {
-            const hrs = parseInt(document.getElementById('inputHours').value) || 1;
-            const sec = hrs * 3600;
-            sendCmd('ARM_TIMER', { sec: sec });
+            const delayHrs = parseInt(document.getElementById('inputDelayHours')?.value) || 0;
+            const runHrs = parseInt(document.getElementById('inputRunHours')?.value) || 0;
+            const delaySec = delayHrs * 3600;
+            const runSec = runHrs * 3600;
+            sendCmd('ARM_TIMER', { delay_sec: delaySec, run_sec: runSec });
         }
 
         setInterval(() => {
@@ -918,7 +950,7 @@
                 const badge = document.getElementById('badgeState');
                 if (badge) {
                     badge.className = 'status-badge ' + currentBeaconState;
-                    badge.innerText = currentBeaconState;
+                    badge.innerText = getFriendlyState(currentBeaconState);
                 }
             }
         }, 1000);

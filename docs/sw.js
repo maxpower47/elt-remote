@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lora-beacon-pwa-v1.4.0';
+const CACHE_NAME = 'lora-beacon-pwa-v1.4.2';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',

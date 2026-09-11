@@ -165,16 +165,19 @@ void test_binary_protocol_structures() {
     TEST_ASSERT_FLOAT_WITHIN(0.0001F, 34.0522F, (float)decoded->lat_e7 / 1e7);
     TEST_ASSERT_FLOAT_WITHIN(0.0001F, -118.2437F, (float)decoded->lon_e7 / 1e7);
 
-    // Command packet size check
-    TEST_ASSERT_EQUAL_UINT32(8, sizeof(LoRaCommandPacket));
+    // Command packet size check (12 bytes)
+    TEST_ASSERT_EQUAL_UINT32(12, sizeof(LoRaCommandPacket));
     LoRaCommandPacket cmd;
     cmd.msg_type = MSG_TYPE_COMMAND;
     cmd.seq_num = 1;
-    cmd.cmd = CMD_ARM_NOW;
+    cmd.cmd = CMD_ARM_TIMER;
     cmd.reserved = 0;
-    cmd.param = 0;
+    cmd.delay_sec = 3600;
+    cmd.runtime_sec = 7200;
     TEST_ASSERT_EQUAL_UINT8(MSG_TYPE_COMMAND, cmd.msg_type);
-    TEST_ASSERT_EQUAL_UINT8(CMD_ARM_NOW, cmd.cmd);
+    TEST_ASSERT_EQUAL_UINT8(CMD_ARM_TIMER, cmd.cmd);
+    TEST_ASSERT_EQUAL_UINT32(3600, cmd.delay_sec);
+    TEST_ASSERT_EQUAL_UINT32(7200, cmd.runtime_sec);
 }
 
 int main() {

@@ -64,8 +64,24 @@ const char* menuItems[] = {
 const int TOTAL_MENU_ITEMS = 3;
 int selectedMenuItem = 0;
 
+// menuMode:
+// 0: Main Command Menu
+// 1: Timer Submenu (Set Delay, Set Run Time, Arm, Back)
+// 2: Set Delay editor
+// 3: Set Run Time editor
 int menuMode = 0;
-int selectedHours = 1;
+
+const char* timerSubmenuItems[] = {
+    "1. SET DELAY",
+    "2. SET RUN TIME",
+    "3. ARM",
+    "4. BACK"
+};
+const int TOTAL_TIMER_SUBMENU_ITEMS = 4;
+int selectedTimerSubmenuItem = 0;
+
+int delayHours = 1; // 0 = immediate, 1..72h
+int runHours = 0;   // 0 = indefinite, 1..72h
 
 // Precise Battery & USB Power Detection for Heltec V3
 float readTxBatteryVoltage() {
@@ -145,12 +161,23 @@ void transmitLoRaCommand(String cmd) {
         pkt.cmd = CMD_DISARM;
     } else if (cmdStr == "ARM_NOW") {
         pkt.cmd = CMD_ARM_NOW;
+        if (jsonErr == DeserializationError::Ok && doc.containsKey("run_sec")) {
+            pkt.runtime_sec = doc["run_sec"].as<uint32_t>();
+        }
     } else if (cmdStr == "ARM_TIMER") {
         pkt.cmd = CMD_ARM_TIMER;
-        if (jsonErr == DeserializationError::Ok && doc.containsKey("sec")) {
-            pkt.param = doc["sec"].as<uint32_t>();
+        if (jsonErr == DeserializationError::Ok) {
+            if (doc.containsKey("delay_sec")) {
+                pkt.delay_sec = doc["delay_sec"].as<uint32_t>();
+            } else if (doc.containsKey("sec")) {
+                pkt.delay_sec = doc["sec"].as<uint32_t>();
+            }
+            if (doc.containsKey("run_sec")) {
+                pkt.runtime_sec = doc["run_sec"].as<uint32_t>();
+            }
         } else {
-            pkt.param = selectedHours * 3600;
+            pkt.delay_sec = delayHours * 3600;
+            pkt.runtime_sec = runHours * 3600;
         }
     }
 
@@ -161,7 +188,7 @@ void transmitLoRaCommand(String cmd) {
     radio.clearDio1Action();
     int res = radio.startTransmit((uint8_t*)&pkt, sizeof(pkt));
     radio.setDio1Action(onDio1);
-    Serial.printf("[Heltec V3 Binary TX] Cmd: 0x%02X, Param: %u (startTransmit: %d)\n", pkt.cmd, pkt.param, res);
+    Serial.printf("[Heltec V3 Binary TX] Cmd: 0x%02X, Delay: %u, Run: %u (startTransmit: %d)\n", pkt.cmd, pkt.delay_sec, pkt.runtime_sec, res);
     if (res != RADIOLIB_ERR_NONE) {
         txInProgress = false;
         recoverRadio();
@@ -262,18 +289,9 @@ void handleButton() {
             longPressHandled = true;
 
             if (currentScreen == 2) {
-                if (menuMode == 1) {
-                    uint32_t sec = (uint32_t)selectedHours * 3600;
-                    String c = "{\"cmd\":\"ARM_TIMER\",\"sec\":" + String(sec) + "}";
-                    char cBuf[BLE_CMD_MAX_LEN]; memset(cBuf, 0, sizeof(cBuf)); strncpy(cBuf, c.c_str(), BLE_CMD_MAX_LEN - 1); xQueueSend(bleCommandQueue, cBuf, 0);
-                    lastTxStatus = "Sending " + String(selectedHours) + "h Timer...";
-                    triggerToastPopup("✓ " + String(selectedHours) + "h TIMER SENT!");
-                    menuMode = 0;
-                    selectedMenuItem = 0;
-                    currentScreen = 0;
-                } else {
+                if (menuMode == 0) {
                     switch (selectedMenuItem) {
-                        case 0:
+                        case 0: // ARM IMMEDIATELY
                             {
                                 String c = "{\"cmd\":\"ARM_NOW\"}";
                                 char cBuf[BLE_CMD_MAX_LEN]; memset(cBuf, 0, sizeof(cBuf)); strncpy(cBuf, c.c_str(), BLE_CMD_MAX_LEN - 1); xQueueSend(bleCommandQueue, cBuf, 0);
@@ -283,10 +301,11 @@ void handleButton() {
                                 currentScreen = 0;
                             }
                             break;
-                        case 1:
+                        case 1: // ARM WITH TIMER >
                             menuMode = 1;
+                            selectedTimerSubmenuItem = 0;
                             break;
-                        case 2:
+                        case 2: // DISARM BEACON
                             {
                                 String c = "{\"cmd\":\"DISARM\"}";
                                 char cBuf[BLE_CMD_MAX_LEN]; memset(cBuf, 0, sizeof(cBuf)); strncpy(cBuf, c.c_str(), BLE_CMD_MAX_LEN - 1); xQueueSend(bleCommandQueue, cBuf, 0);
@@ -297,6 +316,39 @@ void handleButton() {
                             }
                             break;
                     }
+                } else if (menuMode == 1) {
+                    // Timer Submenu: 0: Set Delay, 1: Set Run Time, 2: Arm, 3: Back
+                    switch (selectedTimerSubmenuItem) {
+                        case 0: // Set Delay
+                            menuMode = 2;
+                            break;
+                        case 1: // Set Run Time
+                            menuMode = 3;
+                            break;
+                        case 2: // Arm
+                            {
+                                uint32_t dSec = (uint32_t)delayHours * 3600;
+                                uint32_t rSec = (uint32_t)runHours * 3600;
+                                String c = "{\"cmd\":\"ARM_TIMER\",\"delay_sec\":" + String(dSec) + ",\"run_sec\":" + String(rSec) + "}";
+                                char cBuf[BLE_CMD_MAX_LEN]; memset(cBuf, 0, sizeof(cBuf)); strncpy(cBuf, c.c_str(), BLE_CMD_MAX_LEN - 1); xQueueSend(bleCommandQueue, cBuf, 0);
+                                lastTxStatus = "Sending Arm Timer...";
+                                triggerToastPopup("✓ ARM TIMER SENT!");
+                                menuMode = 0;
+                                selectedTimerSubmenuItem = 0;
+                                selectedMenuItem = 0;
+                                currentScreen = 0;
+                            }
+                            break;
+                        case 3: // Back
+                            menuMode = 0;
+                            break;
+                    }
+                } else if (menuMode == 2) {
+                    // Confirm Delay hours -> return to timer submenu
+                    menuMode = 1;
+                } else if (menuMode == 3) {
+                    // Confirm Run hours -> return to timer submenu
+                    menuMode = 1;
                 }
             } else {
                 currentScreen = 2; // Jump directly to Command menu
@@ -323,15 +375,23 @@ void handleButton() {
 
                 // SHORT CLICK
                 if (currentScreen == 2) {
-                    if (menuMode == 1) {
-                        selectedHours++;
-                        if (selectedHours > 72) selectedHours = 1;
-                    } else {
+                    if (menuMode == 0) {
                         selectedMenuItem++;
                         if (selectedMenuItem >= TOTAL_MENU_ITEMS) {
                             selectedMenuItem = 0;
                             currentScreen = 3; // Advance to Screen 4 (Signal Analyzer)
                         }
+                    } else if (menuMode == 1) {
+                        selectedTimerSubmenuItem++;
+                        if (selectedTimerSubmenuItem >= TOTAL_TIMER_SUBMENU_ITEMS) {
+                            selectedTimerSubmenuItem = 0;
+                        }
+                    } else if (menuMode == 2) {
+                        delayHours++;
+                        if (delayHours > 72) delayHours = 0; // 0h to 72h (0h = No delay)
+                    } else if (menuMode == 3) {
+                        runHours++;
+                        if (runHours > 72) runHours = 0; // 0h to 72h (0h = Indefinite)
                     }
                 } else {
                     currentScreen = (currentScreen + 1) % TOTAL_SCREENS;
@@ -552,23 +612,42 @@ int voltageToPercent(float v) {
     return (int)(((v - 3.3F) / 0.3F) * 15.0F);
 }
 
+String formatFriendlyState(const String& state) {
+    if (state == "ARMED_TIMER") return "Armed (Timer)";
+    if (state == "ACTIVE")      return "Active (Alarm)";
+    if (state == "DISARMED")    return "Disarmed (Safe)";
+    if (state == "LOST LINK")   return "Lost Link";
+    if (state == "UNKNOWN")     return "Searching...";
+    return state;
+}
+
 void renderScreen0() {
     drawHeader("1. SYSTEM SUMMARY");
 
     uint32_t ageSec = (lastRxTime > 0) ? (millis() - lastRxTime) / 1000 : 0;
     bool isLost = (lastRxTime > 0 && ageSec >= 35);
-    String displayState = isLost ? "LOST LINK" : beaconState;
+    String rawState = isLost ? "LOST LINK" : beaconState;
+    String displayState = formatFriendlyState(rawState);
 
     display.setFont(ArialMT_Plain_10);
     display.drawString(0, 15, "State:");
+
     display.setFont(ArialMT_Plain_16);
-    display.drawString(38, 13, displayState);
+    int stateWidth = display.getStringWidth(displayState);
+    if (stateWidth > (128 - 38)) {
+        display.setFont(ArialMT_Plain_10);
+        display.drawString(38, 15, displayState);
+    } else {
+        display.drawString(38, 13, displayState);
+    }
 
     display.setFont(ArialMT_Plain_10);
     if (isLost) {
         display.drawString(0, 31, "Bcn Batt: UNKNOWN (Stale)");
     } else if (beaconState == "ARMED_TIMER") {
-        display.drawString(0, 31, "Timer: " + formatTime(remainingSec) + " remaining");
+        display.drawString(0, 31, "Delay: " + formatTime(remainingSec) + " remaining");
+    } else if (beaconState == "ACTIVE" && remainingSec > 0) {
+        display.drawString(0, 31, "Run: " + formatTime(remainingSec) + " remaining");
     } else {
         if (lastRxTime > 0) {
             String battStr;
@@ -673,25 +752,12 @@ void renderScreen1() {
 }
 
 void renderScreen2() {
-    if (menuMode == 1) {
-        drawHeader("SET TIMER DURATION");
-
-        display.setFont(ArialMT_Plain_10);
-        display.drawString(0, 14, "Set Arm Delay (Hours):");
-
-        display.setFont(ArialMT_Plain_24);
-        String hrsStr = String(selectedHours) + (selectedHours == 1 ? " Hour" : " Hours");
-        display.drawString(10, 26, hrsStr);
-
-        display.setFont(ArialMT_Plain_10);
-        display.drawHorizontalLine(0, 50, 128);
-        display.drawString(0, 52, "[Click: +1h | Hold: Confirm]");
-    } else {
+    if (menuMode == 0) {
         drawHeader("3. COMMAND MENU");
 
         display.setFont(ArialMT_Plain_10);
         for (int i = 0; i < TOTAL_MENU_ITEMS; i++) {
-            int y = 14 + (i * 9);
+            int y = 15 + (i * 11);
             if (i == selectedMenuItem) {
                 display.drawString(0, y, "> " + String(menuItems[i]));
             } else {
@@ -701,6 +767,62 @@ void renderScreen2() {
 
         display.drawHorizontalLine(0, 52, 128);
         display.drawString(0, 53, "[Click: Next | Hold: Select]");
+    } else if (menuMode == 1) {
+        drawHeader("TIMER CONFIG");
+
+        display.setFont(ArialMT_Plain_10);
+        for (int i = 0; i < TOTAL_TIMER_SUBMENU_ITEMS; i++) {
+            int y = 14 + (i * 9);
+            String label = "";
+            if (i == 0) {
+                label = "1. SET DELAY: " + (delayHours == 0 ? "NONE" : String(delayHours) + "h");
+            } else if (i == 1) {
+                label = "2. SET RUN:   " + (runHours == 0 ? "INDEF" : String(runHours) + "h");
+            } else if (i == 2) {
+                label = "3. ARM";
+            } else if (i == 3) {
+                label = "4. BACK";
+            }
+
+            if (i == selectedTimerSubmenuItem) {
+                display.drawString(0, y, "> " + label);
+            } else {
+                display.drawString(0, y, "  " + label);
+            }
+        }
+
+        display.drawHorizontalLine(0, 52, 128);
+        display.drawString(0, 53, "[Click: Next | Hold: Select]");
+    } else if (menuMode == 2) {
+        drawHeader("SET ARM DELAY");
+
+        display.setFont(ArialMT_Plain_10);
+        display.drawString(0, 14, "Delay Before Arming:");
+
+        display.setFont(ArialMT_Plain_24);
+        String delayStr;
+        if (delayHours == 0) delayStr = "0 Hours (None)";
+        else delayStr = String(delayHours) + (delayHours == 1 ? " Hour" : " Hours");
+        display.drawString(6, 26, delayStr);
+
+        display.setFont(ArialMT_Plain_10);
+        display.drawHorizontalLine(0, 50, 128);
+        display.drawString(0, 52, "[Click: +1h | Hold: Confirm]");
+    } else if (menuMode == 3) {
+        drawHeader("SET RUN TIME");
+
+        display.setFont(ArialMT_Plain_10);
+        display.drawString(0, 14, "Active Duration:");
+
+        display.setFont(ArialMT_Plain_24);
+        String runStr;
+        if (runHours == 0) runStr = "Indefinite";
+        else runStr = String(runHours) + (runHours == 1 ? " Hour" : " Hours");
+        display.drawString(6, 26, runStr);
+
+        display.setFont(ArialMT_Plain_10);
+        display.drawHorizontalLine(0, 50, 128);
+        display.drawString(0, 52, "[Click: +1h | Hold: Confirm]");
     }
 }
 
@@ -947,10 +1069,20 @@ void loop() {
                     } else if (serialAccum == "DISARM") {
                         snprintf(cBuf, sizeof(cBuf), "{\"cmd\":\"DISARM\"}");
                     } else if (serialAccum.startsWith("ARM_TIMER")) {
-                        uint32_t sec = 3600;
+                        uint32_t delaySec = 3600;
+                        uint32_t runSec = 0;
                         int spaceIdx = serialAccum.indexOf(' ');
-                        if (spaceIdx > 0) sec = serialAccum.substring(spaceIdx + 1).toInt();
-                        snprintf(cBuf, sizeof(cBuf), "{\"cmd\":\"ARM_TIMER\",\"sec\":%u}", sec);
+                        if (spaceIdx > 0) {
+                            String rest = serialAccum.substring(spaceIdx + 1);
+                            int space2 = rest.indexOf(' ');
+                            if (space2 > 0) {
+                                delaySec = rest.substring(0, space2).toInt();
+                                runSec = rest.substring(space2 + 1).toInt();
+                            } else {
+                                delaySec = rest.toInt();
+                            }
+                        }
+                        snprintf(cBuf, sizeof(cBuf), "{\"cmd\":\"ARM_TIMER\",\"delay_sec\":%u,\"run_sec\":%u}", delaySec, runSec);
                     } else {
                         strncpy(cBuf, serialAccum.c_str(), sizeof(cBuf) - 1);
                     }
@@ -1035,17 +1167,25 @@ void loop() {
     // --- OLED display update (Event-Driven + 1Hz periodic timer tick) ---
     static uint32_t lastOledUpdate = 0;
     static int lastScreen = -1;
+    static int lastMenuMode = -1;
     static int lastMenuItem = -1;
-    static int lastHours = -1;
+    static int lastSubmenuItem = -1;
+    static int lastDelayHours = -1;
+    static int lastRunHours = -1;
     static uint32_t lastRxCount = 0;
     static bool lastBtnState = false;
 
     bool forceUpdate = false;
-    if (currentScreen != lastScreen || selectedMenuItem != lastMenuItem || selectedHours != lastHours || packetCount != lastRxCount || buttonWasPressedGlob != lastBtnState) {
+    if (currentScreen != lastScreen || menuMode != lastMenuMode || selectedMenuItem != lastMenuItem ||
+        selectedTimerSubmenuItem != lastSubmenuItem || delayHours != lastDelayHours || runHours != lastRunHours ||
+        packetCount != lastRxCount || buttonWasPressedGlob != lastBtnState) {
         forceUpdate = true;
         lastScreen = currentScreen;
+        lastMenuMode = menuMode;
         lastMenuItem = selectedMenuItem;
-        lastHours = selectedHours;
+        lastSubmenuItem = selectedTimerSubmenuItem;
+        lastDelayHours = delayHours;
+        lastRunHours = runHours;
         lastRxCount = packetCount;
         lastBtnState = buttonWasPressedGlob;
     }
